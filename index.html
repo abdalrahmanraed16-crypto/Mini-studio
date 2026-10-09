@@ -1,0 +1,2715 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Mini Studio</title>
+<style>
+  :root {
+    --bg: #1a1a1a; --panel: #252526; --panel-2: #2d2d30;
+    --border: #3e3e42; --text: #cccccc; --text-dim: #858585;
+    --accent: #007acc; --play: #16a34a; --stop: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); font-size: 13px; }
+
+  #app {
+    display: grid;
+    grid-template-columns: 220px 1fr 260px;
+    grid-template-rows: 40px 1fr 24px;
+    grid-template-areas:
+      "toolbar toolbar toolbar"
+      "explorer viewport inspector"
+      "status  status   status";
+    height: 100vh;
+  }
+  #toolbar  { grid-area: toolbar; display: flex; align-items: center;
+              gap: 6px; padding: 0 10px; background: var(--panel);
+              border-bottom: 1px solid var(--border); flex-wrap: wrap;
+              overflow-x: auto; }
+  #explorer { grid-area: explorer; background: var(--panel);
+              border-right: 1px solid var(--border); overflow-y: auto;
+              transition: opacity 0.15s; }
+  #viewport { grid-area: viewport; position: relative; background: #202020; }
+  #inspector{ grid-area: inspector; background: var(--panel);
+              border-left: 1px solid var(--border); overflow-y: auto;
+              transition: opacity 0.15s; }
+  #status   { grid-area: status; background: var(--panel-2);
+              border-top: 1px solid var(--border); padding: 0 10px;
+              display: flex; align-items: center; font-size: 11px;
+              color: var(--text-dim); gap: 12px; }
+
+  body.playing #explorer, body.playing #inspector {
+    opacity: 0.35; pointer-events: none;
+  }
+  body.playing .tool-btn[data-tool] { opacity: 0.4; pointer-events: none; }
+  body.playing #hint { display: none; }
+  #play-hint { display: none; position: absolute; bottom: 10px; left: 10px;
+    background: rgba(22,163,74,0.85); padding: 6px 12px; border-radius: 4px;
+    font-size: 11px; color: #fff; pointer-events: none; line-height: 1.5;
+    z-index: 10; }
+  body.playing #play-hint { display: block; }
+  #play-hint b { color: #fff; }
+
+  canvas { display: block; width: 100%; height: 100%; }
+
+  #gui-layer {
+    position: absolute; inset: 0;
+    pointer-events: none; overflow: hidden; z-index: 5;
+  }
+  .gui-textlabel {
+    position: absolute; display: flex; align-items: center;
+    justify-content: center; padding: 4px 6px; box-sizing: border-box;
+    user-select: none; white-space: pre-wrap; word-break: break-word;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.15; text-align: center;
+    pointer-events: auto; cursor: move; transition: outline 0.08s;
+  }
+  .gui-textlabel.selected { outline: 2px dashed #00a2ff; outline-offset: 1px; }
+  body.playing .gui-textlabel { pointer-events: none; cursor: default; }
+  body.playing .gui-textlabel.selected { outline: none; }
+
+  .gui-imagelabel, .gui-videolabel {
+    position: absolute; display: flex; align-items: center;
+    justify-content: center; box-sizing: border-box;
+    user-select: none; pointer-events: auto; cursor: move;
+    overflow: hidden; transition: outline 0.08s;
+  }
+  .gui-imagelabel.selected, .gui-videolabel.selected {
+    outline: 2px dashed #00a2ff; outline-offset: 1px;
+  }
+  body.playing .gui-imagelabel,
+  body.playing .gui-videolabel { pointer-events: none; cursor: default; }
+  body.playing .gui-imagelabel.selected,
+  body.playing .gui-videolabel.selected { outline: none; }
+  .gui-imagelabel > img,
+  .gui-videolabel > video {
+    width: 100%; height: 100%; object-fit: contain;
+    pointer-events: none; display: block;
+  }
+  .gui-placeholder {
+    color: #888; font-size: 12px; font-style: italic;
+    padding: 4px; text-align: center;
+  }
+
+  .tool-btn {
+    background: transparent; color: var(--text); border: 1px solid transparent;
+    padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;
+    white-space: nowrap;
+  }
+  .tool-btn:hover { background: var(--panel-2); }
+  .tool-btn.active { background: var(--accent); color: #fff; }
+  .tool-btn.danger:hover { background: #a12622; }
+  .tool-btn.play { color: #7ee787; }
+  .tool-btn.play:hover:not(:disabled) { background: rgba(22,163,74,0.2); }
+  .tool-btn.stop { color: #ff7b72; }
+  .tool-btn.stop:hover:not(:disabled) { background: rgba(220,38,38,0.2); }
+  .tool-btn.save { color: #8ec9ff; }
+  .tool-btn.save:hover { background: rgba(0,122,204,0.2); }
+  .tool-btn.load { color: #f0c674; }
+  .tool-btn.load:hover { background: rgba(240,198,116,0.15); }
+  .tool-btn.gui { color: #c39bff; }
+  .tool-btn.gui:hover { background: rgba(160,108,213,0.25); }
+  .tool-btn:disabled { opacity: 0.3; cursor: default; }
+  .sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+
+  .panel-title {
+    padding: 8px 12px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tree { padding: 4px 0; font-size: 12px; }
+  .tree-item {
+    display: flex; align-items: center;
+    padding: 3px 8px 3px 0; cursor: pointer; user-select: none;
+    white-space: nowrap; min-height: 20px;
+  }
+  .tree-item:hover { background: var(--panel-2); }
+  .tree-item.selected { background: var(--accent); color: #fff; }
+  .tree-arrow { width: 14px; font-size: 9px; text-align: center;
+    color: var(--text-dim); flex-shrink: 0; }
+  .tree-item.selected .tree-arrow { color: #fff; }
+  .tree-icon {
+    width: 12px; height: 12px; border-radius: 2px;
+    margin: 0 6px 0 2px; flex-shrink: 0;
+    background: #a0a0a0; border: 1px solid rgba(0,0,0,0.3);
+  }
+  .tree-icon.workspace        { background: #e5b800; }
+  .tree-icon.lighting         { background: #f5cd30; }
+  .tree-icon.baseplate        { background: #4a4a4a; }
+  .tree-icon.part             { background: #00a2ff; }
+  .tree-icon.sphere           { border-radius: 50%; background: #e74c3c; }
+  .tree-icon.cylinder         { border-radius: 2px; background: #2ecc71; }
+  .tree-icon.spawn            { border-radius: 50%; background: #4d4d4d;
+                                box-shadow: inset 0 0 0 2px #f0f0f0; }
+  .tree-icon.starterplayer    { background: #00a2ff; }
+  .tree-icon.folder           { background: #7a7a7a; }
+  .tree-icon.startergui       { background: #a06cd5; }
+  .tree-icon.textlabel        { background: #c39bff; }
+  .tree-icon.imagelabel       { background: #ff9f43; }
+  .tree-icon.videolabel       { background: #ee5a24; }
+  .tree-icon.starterpack      { background: #a06cd5; }
+  .tree-icon.replicatedstorage{ background: #a06cd5; }
+  .tree-icon.serverstorage    { background: #a06cd5; }
+  .tree-icon.serverscriptservice { background: #a06cd5; }
+  .tree-icon.soundservice     { background: #ff7b72; }
+  .tree-icon.players          { background: #2ecc71; }
+  .tree-icon.teams            { background: #2ecc71; }
+  .tree-label { overflow: hidden; text-overflow: ellipsis; }
+
+  .field { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .field label { display: block; font-size: 11px; color: var(--text-dim);
+                 margin-bottom: 4px; }
+  .field input[type="text"], .field input[type="number"] {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--text); padding: 4px 6px; border-radius: 3px;
+    font-family: inherit; font-size: 12px;
+  }
+  .field textarea {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--text); padding: 4px 6px; border-radius: 3px;
+    font-family: inherit; font-size: 12px; resize: vertical; min-height: 50px;
+  }
+  .field input:focus, .field textarea:focus {
+    outline: 1px solid var(--accent); border-color: var(--accent);
+  }
+  .field select {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--text); padding: 4px 6px; border-radius: 3px;
+    font-family: inherit; font-size: 12px; cursor: pointer;
+  }
+  .field select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  .field input[type="range"] { accent-color: var(--accent); height: 4px; cursor: pointer; }
+  .field input[type="file"] { color: var(--text); font-size: 11px; cursor: pointer; }
+  .row { display: flex; gap: 4px; }
+  .row input { flex: 1; min-width: 0; }
+  .empty { padding: 20px 12px; color: var(--text-dim);
+           text-align: center; font-style: italic; }
+
+  .section-header {
+    padding: 8px 12px 4px 12px;
+    font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--text-dim);
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--border);
+    margin-top: 2px;
+  }
+
+  .add-btn {
+    display: block; width: calc(100% - 24px); margin: 10px 12px;
+    background: #5a2fa0; color: #fff;
+    border: 1px solid #7a4fc0; border-radius: 4px;
+    padding: 8px; font-size: 12px; font-weight: 600;
+    cursor: pointer;
+  }
+  .add-btn:hover { background: #6a3fb0; }
+
+  #viewport.placing { cursor: crosshair; }
+  body.dragging { cursor: grabbing; }
+
+  #hint { position: absolute; bottom: 10px; left: 10px;
+    background: rgba(0,0,0,0.55); padding: 6px 10px;
+    border-radius: 4px; font-size: 11px; color: #bbb;
+    pointer-events: none; line-height: 1.5; z-index: 10; }
+  #hint b { color: #fff; }
+
+  #toast {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(22,163,74,0.95); color: #fff;
+    padding: 8px 16px; border-radius: 4px;
+    font-size: 12px; font-weight: 600;
+    pointer-events: none; opacity: 0;
+    transition: opacity 0.25s; z-index: 100;
+  }
+  #toast.show { opacity: 1; }
+  #toast.error { background: rgba(220,38,38,0.95); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="toolbar"></div>
+  <div id="explorer">
+    <div class="panel-title">Explorer</div>
+    <div class="tree" id="tree"></div>
+  </div>
+  <div id="viewport">
+    <canvas id="canvas"></canvas>
+    <div id="gui-layer"></div>
+    <div id="hint">
+      <b>LMB drag part</b> move &nbsp;·&nbsp; <b>RMB</b> rotate &nbsp;·&nbsp;
+      <b>MMB</b> pan &nbsp;·&nbsp; <b>Scroll</b> zoom<br>
+      <b>WASD</b> fly &nbsp;·&nbsp; <b>Q/E</b> down/up &nbsp;·&nbsp; <b>Shift</b> sprint
+    </div>
+    <div id="play-hint">
+      <b>WASD</b> walk &nbsp;·&nbsp; <b>Space</b> jump &nbsp;·&nbsp;
+      <b>RMB</b> look &nbsp;·&nbsp; <b>I/O</b> zoom &nbsp;·&nbsp; <b>Esc</b> stop
+    </div>
+    <div id="toast"></div>
+  </div>
+  <div id="inspector">
+    <div class="panel-title">Properties</div>
+    <div id="props"></div>
+  </div>
+  <div id="status">
+    <span id="status-text">Ready</span>
+    <span id="status-play" style="color:#7ee787; display:none;">● PLAYING</span>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ============================================================
+   EventBus
+   ============================================================ */
+class EventBus {
+  constructor() { this.map = new Map(); }
+  on(evt, fn) {
+    if (!this.map.has(evt)) this.map.set(evt, new Set());
+    this.map.get(evt).add(fn);
+    return () => this.map.get(evt).delete(fn);
+  }
+  emit(evt, payload) {
+    if (this.map.has(evt)) for (const fn of this.map.get(evt)) fn(payload);
+  }
+}
+
+/* ============================================================
+   HierNode + buildDefaultGame
+   ============================================================ */
+class HierNode {
+  constructor(name, type) {
+    this.name = name; this.type = type;
+    this.children = []; this.parent = null;
+    this.expanded = true;
+    this.object3D = null; this.service = null; this.guiElement = null;
+  }
+  add(child) { child.parent = this; this.children.push(child); return child; }
+  remove(child) {
+    const i = this.children.indexOf(child);
+    if (i >= 0) this.children.splice(i, 1);
+    child.parent = null;
+  }
+}
+
+function buildDefaultGame() {
+  const root = new HierNode('Game', 'game');
+  const workspace = new HierNode('Workspace', 'workspace');
+  workspace.add(new HierNode('Baseplate', 'baseplate'));
+  workspace.add(new HierNode('Camera', 'folder'));
+  const players = new HierNode('Players', 'players');
+  const lighting = new HierNode('Lighting', 'lighting');
+  lighting.add(new HierNode('Sun', 'folder'));
+  lighting.add(new HierNode('Ambient', 'folder'));
+  const starterPlayer = new HierNode('StarterPlayer', 'starterplayer');
+  starterPlayer.add(new HierNode('StarterPlayerScripts', 'folder'));
+  starterPlayer.add(new HierNode('StarterCharacterScripts', 'folder'));
+  const starterGui          = new HierNode('StarterGui', 'startergui');
+  const starterPack         = new HierNode('StarterPack', 'starterpack');
+  const replicatedStorage   = new HierNode('ReplicatedStorage', 'replicatedstorage');
+  const serverScriptService = new HierNode('ServerScriptService', 'serverscriptservice');
+  const serverStorage       = new HierNode('ServerStorage', 'serverstorage');
+  const soundService        = new HierNode('SoundService', 'soundservice');
+  const teams               = new HierNode('Teams', 'teams');
+  root.add(workspace); root.add(players); root.add(lighting);
+  root.add(starterPlayer); root.add(starterGui); root.add(starterPack);
+  root.add(replicatedStorage); root.add(serverScriptService);
+  root.add(serverStorage); root.add(soundService); root.add(teams);
+  return { root, workspace, lighting, starterPlayer, players, starterGui };
+}
+
+/* ============================================================
+   Services
+   ============================================================ */
+class StarterPlayerService {
+  constructor() {
+    this.isService = true;
+    this.serviceType = 'StarterPlayer';
+    this.name = 'StarterPlayer';
+    this.cameraZoomable  = true;
+    this.lockFirstPerson = false;
+  }
+}
+class PlayersService {
+  constructor() {
+    this.isService = true;
+    this.serviceType = 'Players';
+    this.name = 'Players';
+    this._respawnTime = 3;
+  }
+  get respawnTime() { return this._respawnTime; }
+  set respawnTime(v) {
+    const n = Number(v);
+    this._respawnTime = (isFinite(n) && n >= 0) ? n : 0;
+  }
+}
+
+/* ============================================================
+   GUI element classes
+   ============================================================ */
+class TextLabel {
+  constructor(opts = {}) {
+    this.isGuiElement = true;
+    this.type = 'TextLabel';
+    this.name = opts.name || 'TextLabel';
+    this.text = opts.text ?? 'Text';
+    this.x = (opts.x ?? 0.35);
+    this.y = (opts.y ?? 0.40);
+    this.w = (opts.w ?? 0.30);
+    this.h = (opts.h ?? 0.10);
+    this.textColor       = opts.textColor ?? '#ffffff';
+    this.backgroundColor = opts.backgroundColor ?? '#000000';
+    this.backgroundTransparency = (opts.backgroundTransparency ?? 0.5);
+    this.fontSize = (opts.fontSize ?? 28);
+    this.visible = opts.visible !== false;
+    this.hierNode = null;
+  }
+}
+class ImageLabel {
+  constructor(opts = {}) {
+    this.isGuiElement = true;
+    this.type = 'ImageLabel';
+    this.name = opts.name || 'ImageLabel';
+    this.x = (opts.x ?? 0.30);
+    this.y = (opts.y ?? 0.25);
+    this.w = (opts.w ?? 0.40);
+    this.h = (opts.h ?? 0.50);
+    this.backgroundColor        = opts.backgroundColor ?? '#000000';
+    this.backgroundTransparency = (opts.backgroundTransparency ?? 1);
+    this.imageTransparency      = (opts.imageTransparency ?? 0);
+    this.src = opts.src || null;
+    this.fileName = opts.fileName || null;
+    this.visible = opts.visible !== false;
+    this.hierNode = null;
+  }
+}
+class VideoLabel {
+  constructor(opts = {}) {
+    this.isGuiElement = true;
+    this.type = 'VideoLabel';
+    this.name = opts.name || 'VideoLabel';
+    this.x = (opts.x ?? 0.20);
+    this.y = (opts.y ?? 0.20);
+    this.w = (opts.w ?? 0.60);
+    this.h = (opts.h ?? 0.60);
+    this.backgroundColor        = opts.backgroundColor ?? '#000000';
+    this.backgroundTransparency = (opts.backgroundTransparency ?? 1);
+    this.videoTransparency      = (opts.videoTransparency ?? 0);
+    this.looped   = opts.looped !== false;
+    this.muted    = opts.muted !== false;
+    this.controls = opts.controls === true;
+    this.autoplay = opts.autoplay !== false;
+    this.src = opts.src || null;
+    this.fileName = opts.fileName || null;
+    this.visible = opts.visible !== false;
+    this.hierNode = null;
+  }
+}
+
+class StarterGuiService {
+  constructor(hierarchyNode) {
+    this.isService = true;
+    this.serviceType = 'StarterGui';
+    this.name = 'StarterGui';
+    this.hierarchyNode = hierarchyNode;
+    this.elements = [];
+  }
+  uniqueName(base) {
+    const ctors = { TextLabel, ImageLabel, VideoLabel };
+    const Ctor = ctors[base];
+    const same = this.elements.filter(e => Ctor && e instanceof Ctor).length;
+    return same === 0 ? base : base + (same + 1);
+  }
+  addElement(el) { this.elements.push(el); return el; }
+  removeElement(el) {
+    const i = this.elements.indexOf(el);
+    if (i >= 0) this.elements.splice(i, 1);
+  }
+}
+
+/* ============================================================
+   Helpers
+   ============================================================ */
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+function formatBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / (1024 * 1024)).toFixed(2) + ' MB';
+}
+function clamp01(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function hexToRgba(hex, transparency) {
+  const h = String(hex || '#000000').replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16) || 0;
+  const g = parseInt(h.slice(2, 4), 16) || 0;
+  const b = parseInt(h.slice(4, 6), 16) || 0;
+  const a = 1 - Math.max(0, Math.min(1, Number(transparency) || 0));
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+/* ============================================================
+   GUIRenderer
+   ============================================================ */
+class GUIRenderer {
+  constructor(layerEl, editor) {
+    this.layer = layerEl;
+    this.editor = editor;
+    this.nodeByEl = new Map();
+  }
+  sync() {
+    const sg = this.editor.starterGui;
+    if (!sg) return;
+
+    for (const [el, node] of [...this.nodeByEl]) {
+      if (!sg.elements.includes(el)) {
+        node.remove();
+        this.nodeByEl.delete(el);
+      }
+    }
+
+    for (const el of sg.elements) {
+      let node = this.nodeByEl.get(el);
+      if (!node) {
+        node = document.createElement('div');
+        if (el.type === 'TextLabel')       node.className = 'gui-textlabel';
+        else if (el.type === 'ImageLabel') node.className = 'gui-imagelabel';
+        else                               node.className = 'gui-videolabel';
+        this.layer.appendChild(node);
+        this.nodeByEl.set(el, node);
+        this._attachHandlers(el, node);
+      }
+      this._applyStyles(el, node);
+      this._applyContent(el, node);
+    }
+  }
+
+  _applyStyles(el, node) {
+    node.style.left   = (el.x * 100) + '%';
+    node.style.top    = (el.y * 100) + '%';
+    node.style.width  = (el.w * 100) + '%';
+    node.style.height = (el.h * 100) + '%';
+    node.style.background = hexToRgba(el.backgroundColor, el.backgroundTransparency);
+    node.style.display = el.visible ? 'flex' : 'none';
+    node.classList.toggle('selected', this.editor.selection.current === el);
+  }
+
+  _applyContent(el, node) {
+    if (el.type === 'TextLabel') {
+      node.textContent = el.text;
+      node.style.color = el.textColor;
+      node.style.fontSize = el.fontSize + 'px';
+      node.style.lineHeight = '1.15';
+      node.style.textAlign = 'center';
+      node.style.whiteSpace = 'pre-wrap';
+      node.style.wordBreak = 'break-word';
+      node.style.fontFamily = '-apple-system, "Segoe UI", Roboto, sans-serif';
+    } else if (el.type === 'ImageLabel') {
+      let img = node.querySelector('img');
+      let ph  = node.querySelector('.gui-placeholder');
+      if (el.src) {
+        if (!img) {
+          if (ph) ph.remove();
+          img = document.createElement('img');
+          img.draggable = false;
+          node.appendChild(img);
+        }
+        if (img.src !== el.src) img.src = el.src;
+        img.style.opacity = String(1 - clamp01(el.imageTransparency, 0, 1));
+      } else {
+        if (img) { img.remove(); img = null; }
+        if (!ph) {
+          ph = document.createElement('div');
+          ph.className = 'gui-placeholder';
+          ph.textContent = 'Right-side Properties → Image to upload';
+          node.appendChild(ph);
+        }
+      }
+    } else if (el.type === 'VideoLabel') {
+      let vid = node.querySelector('video');
+      let ph  = node.querySelector('.gui-placeholder');
+      if (el.src) {
+        if (!vid) {
+          if (ph) ph.remove();
+          vid = document.createElement('video');
+          vid.playsInline = true;
+          vid.preload = 'metadata';
+          node.appendChild(vid);
+        }
+        if (vid.src !== el.src) { vid.src = el.src; vid.load(); }
+        vid.loop = !!el.looped;
+        vid.muted = !!el.muted;
+        vid.controls = !!el.controls;
+        vid.style.opacity = String(1 - clamp01(el.videoTransparency, 0, 1));
+        if (el.autoplay) {
+          const p = vid.play();
+          if (p && p.catch) p.catch(() => {});
+        } else {
+          vid.pause();
+        }
+      } else {
+        if (vid) { vid.pause(); vid.remove(); vid = null; }
+        if (!ph) {
+          ph = document.createElement('div');
+          ph.className = 'gui-placeholder';
+          ph.textContent = 'Right-side Properties → Video to upload';
+          node.appendChild(ph);
+        }
+      }
+    }
+  }
+
+  _attachHandlers(el, node) {
+    node.addEventListener('pointerdown', (e) => {
+      if (this.editor.playMode) return;
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      e.preventDefault();
+      this.editor.selection.select(el);
+
+      const rect = this.layer.getBoundingClientRect();
+      const startX = e.clientX, startY = e.clientY;
+      const startElX = el.x, startElY = el.y;
+
+      const onMove = (ev) => {
+        const dx = (ev.clientX - startX) / rect.width;
+        const dy = (ev.clientY - startY) / rect.height;
+        el.x = clamp01(startElX + dx, 0, 1 - el.w);
+        el.y = clamp01(startElY + dy, 0, 1 - el.h);
+        this._applyStyles(el, node);
+        this.editor.bus.emit('gui:moved', el);
+      };
+      const onUp = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+      };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+    });
+  }
+}
+
+/* ============================================================
+   SceneManager
+   ============================================================ */
+class SceneManager {
+  constructor(bus) {
+    this.bus = bus;
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x202020);
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0x333344, 0.9);
+    this.scene.add(this.hemi);
+    this.dir = new THREE.DirectionalLight(0xffffff, 1.4);
+    this.dir.position.set(30, 50, 20);
+    this.dir.castShadow = true;
+    this.dir.shadow.mapSize.set(2048, 2048);
+    const d = 60;
+    Object.assign(this.dir.shadow.camera, { left: -d, right: d, top: d, bottom: -d });
+    this.dir.shadow.camera.updateProjectionMatrix();
+    this.scene.add(this.dir);
+    const baseMat = new THREE.MeshStandardMaterial({ color: 0x33373d, roughness: 1 });
+    this.baseplate = new THREE.Mesh(new THREE.BoxGeometry(200, 1, 200), baseMat);
+    this.baseplate.position.y = -0.5;
+    this.baseplate.receiveShadow = true;
+    this.baseplate.userData.isBaseplate = true;
+    this.scene.add(this.baseplate);
+    const grid = new THREE.GridHelper(200, 200, 0x555555, 0x2d2d30);
+    grid.position.y = 0.01;
+    this.scene.add(grid);
+  }
+}
+
+/* ============================================================
+   Textures
+   ============================================================ */
+function makeSunTexture() {
+  const size = 256, c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const cx = size/2, cy = size/2;
+  const glow = ctx.createRadialGradient(cx, cy, size*0.10, cx, cy, size*0.5);
+  glow.addColorStop(0,'rgba(255,255,200,1)');
+  glow.addColorStop(0.25,'rgba(255,225,120,0.85)');
+  glow.addColorStop(0.55,'rgba(255,185,70,0.35)');
+  glow.addColorStop(1,'rgba(255,150,30,0)');
+  ctx.fillStyle = glow; ctx.fillRect(0,0,size,size);
+  const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, size*0.22);
+  core.addColorStop(0,'#ffffff');
+  core.addColorStop(0.6,'#fff8b8');
+  core.addColorStop(1,'rgba(255,240,150,0)');
+  ctx.fillStyle = core;
+  ctx.beginPath(); ctx.arc(cx, cy, size*0.22, 0, Math.PI*2); ctx.fill();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  return tex;
+}
+function makeMoonTexture() {
+  const size = 256, c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const cx = size/2, cy = size/2;
+  const glow = ctx.createRadialGradient(cx, cy, size*0.22, cx, cy, size*0.5);
+  glow.addColorStop(0,'rgba(220,220,235,0.45)');
+  glow.addColorStop(1,'rgba(180,180,200,0)');
+  ctx.fillStyle = glow; ctx.fillRect(0,0,size,size);
+  const disc = ctx.createRadialGradient(cx-20,cy-20,5,cx,cy,size*0.28);
+  disc.addColorStop(0,'#f5f5fa'); disc.addColorStop(0.7,'#d8d8e4');
+  disc.addColorStop(1,'#a8a8b8');
+  ctx.fillStyle = disc;
+  ctx.beginPath(); ctx.arc(cx, cy, size*0.28, 0, Math.PI*2); ctx.fill();
+  const craters = [[-30,-25,16],[22,-15,10],[5,30,20],[-15,20,8],[30,18,6],[-25,5,5]];
+  for (const [dx, dy, r] of craters) {
+    const g = ctx.createRadialGradient(cx+dx-r*0.3,cy+dy-r*0.3,0,cx+dx,cy+dy,r);
+    g.addColorStop(0,'rgba(150,150,170,0.55)');
+    g.addColorStop(1,'rgba(180,180,200,0.15)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(cx+dx, cy+dy, r, 0, Math.PI*2); ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  return tex;
+}
+function makeSpawnTopTexture() {
+  const size = 512;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const cx = size / 2, cy = size / 2;
+  ctx.fillStyle = '#4d4d4d';
+  ctx.fillRect(0, 0, size, size);
+  const vig = ctx.createRadialGradient(cx, cy, size * 0.1, cx, cy, size * 0.5);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.35)');
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, size, size);
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.lineWidth = size * 0.03;
+  ctx.beginPath(); ctx.arc(cx, cy, size * 0.46, 0, Math.PI * 2); ctx.stroke();
+  ctx.strokeStyle = '#f0f0f0';
+  ctx.lineWidth = size * 0.022;
+  ctx.beginPath(); ctx.arc(cx, cy, size * 0.40, 0, Math.PI * 2); ctx.stroke();
+  const R_OUT = size * 0.36, R_IN = size * 0.07;
+  ctx.fillStyle = '#f0f0f0';
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const ang = (i / 8) * Math.PI * 2 - Math.PI / 2;
+    const r = (i % 2 === 0) ? R_OUT : R_IN;
+    const x = cx + Math.cos(ang) * r, y = cy + Math.sin(ang) * r;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#4d4d4d';
+  ctx.beginPath(); ctx.arc(cx, cy, size * 0.055, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#f0f0f0';
+  ctx.lineWidth = size * 0.012;
+  ctx.beginPath(); ctx.arc(cx, cy, size * 0.055, 0, Math.PI * 2); ctx.stroke();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+function makeNoobFaceTexture() {
+  const size = 256, c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#f5cd30'; ctx.fillRect(0,0,size,size);
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath();
+  ctx.ellipse(size*0.34, size*0.38, size*0.055, size*0.075, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(size*0.66, size*0.38, size*0.055, size*0.075, 0, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.lineWidth = size*0.05;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(size*0.5, size*0.55, size*0.24, Math.PI*0.20, Math.PI*0.80);
+  ctx.stroke();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  return tex;
+}
+
+/* ============================================================
+   LightingService
+   ============================================================ */
+class LightingService {
+  constructor(scene, hemi, dir) {
+    this.isService = true;
+    this.serviceType = 'Lighting';
+    this.name = 'Lighting';
+    this.scene = scene; this.hemi = hemi; this.dir = dir;
+    this._clockTime = 14;
+    this._sunFile = null; this._moonFile = null;
+    this._sunSpriteDist = 500;
+    this.sunTexture = makeSunTexture();
+    this.sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this.sunTexture, transparent: true, depthWrite: false, fog: false }));
+    this.sunSprite.scale.set(120, 120, 1);
+    this.sunSprite.renderOrder = -1;
+    scene.add(this.sunSprite);
+    this.moonTexture = makeMoonTexture();
+    this.moonSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this.moonTexture, transparent: true, depthWrite: false, fog: false }));
+    this.moonSprite.scale.set(90, 90, 1);
+    this.moonSprite.renderOrder = -1;
+    scene.add(this.moonSprite);
+    this._apply();
+  }
+  get clockTime() { return this._clockTime; }
+  set clockTime(v) { this._clockTime = Math.max(0, Math.min(24, v)); this._apply(); }
+  get sunFile() { return this._sunFile; }
+  get moonFile() { return this._moonFile; }
+  setSunImage(file) {
+    this._sunFile = file;
+    if (!file) { this.sunSprite.material.map = this.sunTexture;
+      this.sunSprite.material.needsUpdate = true; return; }
+    const url = URL.createObjectURL(file);
+    new THREE.TextureLoader().load(url, (tex) => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      this.sunSprite.material.map = tex;
+      this.sunSprite.material.needsUpdate = true;
+      URL.revokeObjectURL(url);
+    });
+  }
+  setMoonImage(file) {
+    this._moonFile = file;
+    if (!file) { this.moonSprite.material.map = this.moonTexture;
+      this.moonSprite.material.needsUpdate = true; return; }
+    const url = URL.createObjectURL(file);
+    new THREE.TextureLoader().load(url, (tex) => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      this.moonSprite.material.map = tex;
+      this.moonSprite.material.needsUpdate = true;
+      URL.revokeObjectURL(url);
+    });
+  }
+  _apply() {
+    const t = this._clockTime;
+    const angle = ((t - 6) / 24) * Math.PI * 2;
+    const dist = 60;
+    this.dir.position.set(Math.cos(angle)*dist, Math.sin(angle)*dist, 20);
+    const D = this._sunSpriteDist;
+    const len = this.dir.position.length() || 1;
+    const k = D / len;
+    this.sunSprite.position.copy(this.dir.position).multiplyScalar(k);
+    this.moonSprite.position.copy(this.dir.position).multiplyScalar(-k);
+    const sunHeight = Math.sin(angle);
+    const day = Math.max(0, sunHeight);
+    this.dir.intensity = 0.15 + day * 1.5;
+    this.hemi.intensity = 0.12 + day * 0.9;
+    const sky = new THREE.Color();
+    if (sunHeight > 0.2) sky.setHex(0x87ceeb);
+    else if (sunHeight > -0.2) {
+      const f = (sunHeight + 0.2) / 0.4;
+      sky.lerpColors(new THREE.Color(0xff8a4a), new THREE.Color(0x87ceeb), f);
+    } else sky.setHex(0x080c18);
+    this.scene.background.copy(sky);
+    if (sunHeight > 0.2) this.dir.color.setHex(0xffffff);
+    else if (sunHeight > -0.2) this.dir.color.setHex(0xffb480);
+    else this.dir.color.setHex(0x5566aa);
+    this.sunSprite.material.opacity  = Math.max(0, Math.min(1, (sunHeight + 0.15) / 0.35));
+    this.moonSprite.material.opacity = Math.max(0, Math.min(1, (-sunHeight + 0.15) / 0.35));
+  }
+}
+
+/* ============================================================
+   CameraRig
+   ============================================================ */
+class CameraRig {
+  constructor(renderer, canvas, viewport, bus) {
+    this.bus = bus; this.canvas = canvas;
+    this.viewport = viewport; this.renderer = renderer;
+    this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 4000);
+    this.camera.position.set(18, 14, 18);
+    this.camera.rotation.order = 'YXZ';
+    this.controls = new OrbitControls(this.camera, canvas);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.12;
+    this.controls.screenSpacePanning = true;
+    this.controls.mouseButtons = {
+      LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE
+    };
+    this.controls.target.set(0, 0, 0);
+    this.controls.minDistance = 1;
+    this.controls.maxDistance = 500;
+    this._firstPerson = false;
+    this._fpActive = false;
+    this._fpLast = { x: 0, y: 0 };
+    this._yaw = 0;
+    this._pitch = 0;
+    this._cameraDistance = 10;
+    this._zoomMin = 4;
+    this._zoomMax = 30;
+    this.keys = new Set();
+    this._baseSpeed = 20; this._sprintMult = 3;
+    this._bindKeys();
+    this._bindFirstPersonLook();
+    addEventListener('resize', () => this.resize());
+    this.resize();
+  }
+  _bindKeys() {
+    const isTyping = (e) => e.target && (e.target.tagName === 'INPUT' ||
+      e.target.tagName === 'TEXTAREA' || e.target.isContentEditable);
+    addEventListener('keydown', (e) => {
+      if (isTyping(e)) return;
+      if (e.code === 'Space') e.preventDefault();
+      this.keys.add(e.code);
+    });
+    addEventListener('keyup', (e) => this.keys.delete(e.code));
+    addEventListener('blur', () => this.keys.clear());
+  }
+  _bindFirstPersonLook() {
+    this.canvas.addEventListener('pointerdown', (e) => {
+      if (e.button !== 2 || !this._firstPerson) return;
+      this._fpActive = true;
+      this._fpLast = { x: e.clientX, y: e.clientY };
+      this.canvas.setPointerCapture(e.pointerId);
+    });
+    this.canvas.addEventListener('pointermove', (e) => {
+      if (!this._fpActive) return;
+      const dx = e.clientX - this._fpLast.x;
+      const dy = e.clientY - this._fpLast.y;
+      this._fpLast = { x: e.clientX, y: e.clientY };
+      this._yaw   -= dx * 0.005;
+      this._pitch -= dy * 0.005;
+      const lim = Math.PI / 2 - 0.05;
+      if (this._pitch >  lim) this._pitch =  lim;
+      if (this._pitch < -lim) this._pitch = -lim;
+    });
+    this.canvas.addEventListener('pointerup', (e) => {
+      if (e.button === 2) {
+        this._fpActive = false;
+        try { this.canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+      }
+    });
+  }
+  setFirstPerson(on) {
+    this._firstPerson = on;
+    this.controls.enabled = !on;
+    if (on) { this._yaw = 0; this._pitch = 0; }
+  }
+  zoomIn()  { this._cameraDistance = Math.max(this._zoomMin, this._cameraDistance - 1.5); }
+  zoomOut() { this._cameraDistance = Math.min(this._zoomMax, this._cameraDistance + 1.5); }
+  update(dt) {
+    const k = this.keys;
+    if (k.size === 0) return;
+    const sprint = k.has('ShiftLeft') || k.has('ShiftRight');
+    const speed = this._baseSpeed * (sprint ? this._sprintMult : 1);
+    const forward = new THREE.Vector3();
+    this.camera.getWorldDirection(forward);
+    const right = new THREE.Vector3()
+      .crossVectors(forward, this.camera.up).normalize();
+    const move = new THREE.Vector3();
+    if (k.has('KeyW')) move.add(forward);
+    if (k.has('KeyS')) move.sub(forward);
+    if (k.has('KeyD')) move.add(right);
+    if (k.has('KeyA')) move.sub(right);
+    if (k.has('KeyE')) move.y += 1;
+    if (k.has('KeyQ')) move.y -= 1;
+    if (move.lengthSq() === 0) return;
+    move.normalize().multiplyScalar(speed * dt);
+    this.camera.position.add(move);
+    this.controls.target.add(move);
+  }
+  resize() {
+    const w = this.viewport.clientWidth || 1;
+    const h = this.viewport.clientHeight || 1;
+    this.renderer.setSize(w, h, false);
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+  }
+}
+
+/* ============================================================
+   PartFactory
+   ============================================================ */
+const SPAWN_TOP_TEXTURE = makeSpawnTopTexture();
+const PartFactory = {
+  create(kind = 'box', opts = {}) {
+    let geo, mesh;
+    if (kind === 'spawn') {
+      geo = new THREE.CylinderGeometry(3, 3, 0.5, 48);
+      const slateSide = new THREE.MeshStandardMaterial({
+        color: 0x4d4d4d, roughness: 0.55, metalness: 0.15 });
+      const slateTop = new THREE.MeshStandardMaterial({
+        map: SPAWN_TOP_TEXTURE, roughness: 0.55, metalness: 0.1 });
+      const slateBottom = new THREE.MeshStandardMaterial({
+        color: 0x3a3a3a, roughness: 0.6, metalness: 0.1 });
+      mesh = new THREE.Mesh(geo, [slateSide, slateTop, slateBottom]);
+      mesh.userData.isSpawnLocation = true;
+    } else {
+      geo = {
+        box:      () => new THREE.BoxGeometry(2, 2, 2),
+        sphere:   () => new THREE.SphereGeometry(1, 32, 16),
+        cylinder: () => new THREE.CylinderGeometry(1, 1, 2, 32),
+      }[kind]();
+      const color = { box: 0x00a2ff, sphere: 0xe74c3c, cylinder: 0x2ecc71 }[kind];
+      const mat = new THREE.MeshStandardMaterial({
+        color, roughness: 0.55, metalness: 0.05, ...opts });
+      mesh = new THREE.Mesh(geo, mat);
+    }
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData.kind = kind;
+    mesh.userData.canCollide = true;
+    mesh.userData.anchored = true;
+    mesh.userData.kill = false;
+    mesh.userData.velocity = new THREE.Vector3();
+    mesh.name = kind === 'spawn' ? 'SpawnLocation'
+      : kind.charAt(0).toUpperCase() + kind.slice(1);
+    return mesh;
+  }
+};
+
+/* ============================================================
+   SelectionManager
+   ============================================================ */
+class SelectionManager {
+  constructor(scene, bus) {
+    this.scene = scene; this.bus = bus;
+    this.current = null; this.outline = null;
+    this.outlineMat = new THREE.LineBasicMaterial({ color: 0x00a2ff });
+  }
+  select(target) {
+    if (target === this.current) return;
+    this.current = target;
+    this._refreshOutline();
+    this.bus.emit('selection:changed', target);
+  }
+  deselect() { this.select(null); }
+  refresh() { this._refreshOutline(); }
+  setVisible(v) { if (this.outline) this.outline.visible = v; }
+  _refreshOutline() {
+    if (this.outline) {
+      this.scene.remove(this.outline);
+      this.outline.geometry.dispose();
+      this.outline = null;
+    }
+    const obj = this.current;
+    if (!obj || !obj.geometry) return;
+    const edges = new THREE.EdgesGeometry(obj.geometry, 30);
+    this.outline = new THREE.LineSegments(edges, this.outlineMat);
+    this.outline.userData.follow = obj;
+    this.syncOutline();
+    this.scene.add(this.outline);
+  }
+  syncOutline() {
+    const o = this.outline; if (!o || !o.userData.follow) return;
+    const t = o.userData.follow;
+    o.position.copy(t.position);
+    o.rotation.copy(t.rotation);
+    o.scale.copy(t.scale);
+  }
+}
+
+/* ============================================================
+   OofSynth
+   ============================================================ */
+class OofSynth {
+  constructor() { this.ctx = null; }
+  _ensureContext() {
+    if (!this.ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      this.ctx = new AC();
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+    return this.ctx;
+  }
+  play() {
+    const ctx = this._ensureContext();
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    const dur = 0.28;
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(0.0001, t0);
+    master.gain.exponentialRampToValueAtTime(0.9, t0 + 0.012);
+    master.gain.setValueAtTime(0.9, t0 + 0.06);
+    master.gain.exponentialRampToValueAtTime(0.35, t0 + 0.20);
+    master.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    master.connect(ctx.destination);
+    const lowpass = ctx.createBiquadFilter();
+    lowpass.type = 'lowpass'; lowpass.Q.value = 1.2;
+    lowpass.frequency.setValueAtTime(1600, t0);
+    lowpass.frequency.exponentialRampToValueAtTime(500, t0 + dur);
+    lowpass.connect(master);
+    const formant = ctx.createBiquadFilter();
+    formant.type = 'bandpass'; formant.Q.value = 1.8;
+    formant.frequency.setValueAtTime(520, t0);
+    formant.frequency.exponentialRampToValueAtTime(360, t0 + dur);
+    formant.connect(lowpass);
+    const osc1 = ctx.createOscillator();
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(165, t0);
+    osc1.frequency.exponentialRampToValueAtTime(85, t0 + dur);
+    const g1 = ctx.createGain(); g1.gain.value = 0.55;
+    osc1.connect(g1).connect(formant);
+    const osc2 = ctx.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(158, t0);
+    osc2.frequency.exponentialRampToValueAtTime(82, t0 + dur);
+    const g2 = ctx.createGain(); g2.gain.value = 0.55;
+    osc2.connect(g2).connect(formant);
+    const noiseLen = Math.floor(ctx.sampleRate * 0.04);
+    const noiseBuf = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
+    const nd = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) nd[i] = (Math.random()*2-1)*(1-i/noiseLen);
+    const noiseSrc = ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuf;
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.25, t0);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.05);
+    const noiseFilter = ctx.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.value = 400; noiseFilter.Q.value = 1;
+    noiseSrc.connect(noiseFilter).connect(noiseGain).connect(master);
+    osc1.start(t0); osc1.stop(t0 + dur);
+    osc2.start(t0); osc2.stop(t0 + dur);
+    noiseSrc.start(t0); noiseSrc.stop(t0 + 0.05);
+  }
+}
+
+/* ============================================================
+   Character
+   ============================================================ */
+class Character {
+  constructor(scene, bus, objects, playersService) {
+    this.scene = scene; this.bus = bus; this.objects = objects;
+    this.playersService = playersService;
+    this.group = new THREE.Group();
+    this.walkTime = 0;
+
+    const YELLOW = 0xf5cd30, BLUE = 0x0f5ec8, GREEN = 0x4b9b3d;
+    const solidMat = (c) => new THREE.MeshStandardMaterial({
+      color: c, roughness: 0.7, metalness: 0.02 });
+    const block = (w, h, d, color) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), solidMat(color));
+      m.castShadow = true; m.receiveShadow = true;
+      return m;
+    };
+    const torso = block(2, 2, 1, BLUE); torso.position.set(0, 3, 0);
+    const headGeo = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+    const faceTex = makeNoobFaceTexture();
+    const headMats = [
+      solidMat(YELLOW), solidMat(YELLOW),
+      solidMat(YELLOW), solidMat(YELLOW),
+      new THREE.MeshStandardMaterial({ map: faceTex, roughness: 0.7 }),
+      solidMat(YELLOW),
+    ];
+    const head = new THREE.Mesh(headGeo, headMats);
+    head.castShadow = true; head.receiveShadow = true;
+    head.position.set(0, 4.75, 0);
+    this.head = head;
+    const makeLimb = (color) => {
+      const pivot = new THREE.Group();
+      const m = block(1, 2, 1, color);
+      m.position.y = -1;
+      pivot.add(m);
+      return pivot;
+    };
+    this.armL = makeLimb(YELLOW); this.armL.position.set(-1.5, 4, 0);
+    this.armR = makeLimb(YELLOW); this.armR.position.set( 1.5, 4, 0);
+    this.legL = makeLimb(GREEN);  this.legL.position.set(-0.5, 2, 0);
+    this.legR = makeLimb(GREEN);  this.legR.position.set( 0.5, 2, 0);
+    this.group.add(torso, head, this.armL, this.armR, this.legL, this.legR);
+    scene.add(this.group);
+
+    this.velocity = new THREE.Vector3();
+    this.onGround = true;
+    this.spawn = this._pickSpawnPoint();
+    this.group.position.copy(this.spawn);
+    this.BASE_HALF = 100;
+    this.VOID_Y = -30;
+    this.halfW = 1.0; this.halfD = 0.7; this.height = 5.5;
+    this.state = 'alive';
+    this.respawnTimer = 0;
+    this._partBox = new THREE.Box3();
+    this._v1 = new THREE.Vector3();
+    this._v2 = new THREE.Vector3();
+    this._v3 = new THREE.Vector3();
+  }
+
+  _pickSpawnPoint() {
+    const spawns = this.objects.filter(o => o.userData.isSpawnLocation);
+    if (spawns.length === 0) return new THREE.Vector3(0, 0, 0);
+    const s = spawns[Math.floor(Math.random() * spawns.length)];
+    const topY = s.position.y + 0.25 * s.scale.y;
+    return new THREE.Vector3(s.position.x, topY, s.position.z);
+  }
+
+  update(dt, keys, camera) {
+    if (this.state === 'dying') {
+      this.respawnTimer -= dt;
+      if (this.respawnTimer <= 0) this.respawn();
+      return;
+    }
+    const speed = 12, jumpSpeed = 15, gravity = 35;
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
+    camDir.y = 0;
+    if (camDir.lengthSq() < 0.001) camDir.set(0, 0, -1);
+    camDir.normalize();
+    const camRight = new THREE.Vector3()
+      .crossVectors(camDir, new THREE.Vector3(0, 1, 0)).normalize();
+    const move = new THREE.Vector3();
+    if (keys.has('KeyW')) move.add(camDir);
+    if (keys.has('KeyS')) move.sub(camDir);
+    if (keys.has('KeyD')) move.add(camRight);
+    if (keys.has('KeyA')) move.sub(camRight);
+    if (move.lengthSq() > 0) move.normalize();
+    this.velocity.x = move.x * speed;
+    this.velocity.z = move.z * speed;
+    if (keys.has('Space') && this.onGround) {
+      this.velocity.y = jumpSpeed; this.onGround = false;
+    }
+    this.velocity.y -= gravity * dt;
+    const prevY = this.group.position.y;
+    this.group.position.addScaledVector(this.velocity, dt);
+    const pos = this.group.position;
+    if (pos.y < this.VOID_Y) { this.die(); return; }
+    const overBaseplate = Math.abs(pos.x) < this.BASE_HALF && Math.abs(pos.z) < this.BASE_HALF;
+    if (overBaseplate) {
+      const descending = this.velocity.y <= 0;
+      const crossedSurface = prevY >= 0 && pos.y <= 0;
+      const sittingOnSurface = prevY === 0 && pos.y <= 0;
+      if (descending && (crossedSurface || sittingOnSurface)) {
+        pos.y = 0; this.velocity.y = 0; this.onGround = true;
+      } else this.onGround = false;
+    } else this.onGround = false;
+    this._collideWithParts();
+    this._checkKillParts();
+    if (move.lengthSq() > 0) {
+      const angle = Math.atan2(move.x, move.z);
+      let diff = angle - this.group.rotation.y;
+      while (diff >  Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      this.group.rotation.y += diff * Math.min(1, dt * 20);
+    }
+    const walking = move.lengthSq() > 0 && this.onGround;
+    if (walking) {
+      this.walkTime += dt * 12;
+      const swing = Math.sin(this.walkTime) * 0.7;
+      this.armL.rotation.x =  swing; this.armR.rotation.x = -swing;
+      this.legL.rotation.x = -swing; this.legR.rotation.x =  swing;
+    } else {
+      const k = Math.min(1, dt * 10);
+      this.armL.rotation.x *= (1 - k); this.armR.rotation.x *= (1 - k);
+      this.legL.rotation.x *= (1 - k); this.legR.rotation.x *= (1 - k);
+    }
+  }
+
+  _checkKillParts() {
+    if (this.state !== 'alive') return;
+    const pos = this.group.position;
+    const pMinX = pos.x - this.halfW, pMaxX = pos.x + this.halfW;
+    const pMinY = pos.y,               pMaxY = pos.y + this.height;
+    const pMinZ = pos.z - this.halfD,  pMaxZ = pos.z + this.halfD;
+    for (const obj of this.objects) {
+      if (obj.userData.kill !== true) continue;
+      const box = this._partBox.setFromObject(obj);
+      if (pMaxX < box.min.x || pMinX > box.max.x) continue;
+      if (pMaxY < box.min.y || pMinY > box.max.y) continue;
+      if (pMaxZ < box.min.z || pMinZ > box.max.z) continue;
+      this.die();
+      return;
+    }
+  }
+
+  _collideWithParts() {
+    const pos = this.group.position;
+    const pMinX = pos.x - this.halfW, pMaxX = pos.x + this.halfW;
+    const pMinY = pos.y,                pMaxY = pos.y + this.height;
+    const pMinZ = pos.z - this.halfD,   pMaxZ = pos.z + this.halfD;
+    const pCx = pos.x, pCy = pos.y + this.height * 0.5, pCz = pos.z;
+    const pHx = this.halfW, pHy = this.height * 0.5, kHz = this.halfD;
+
+    for (const obj of this.objects) {
+      if (obj.userData.canCollide === false) continue;
+      this._partBox.setFromObject(obj);
+      if (pMaxX < this._partBox.min.x || pMinX > this._partBox.max.x) continue;
+      if (pMaxY < this._partBox.min.y || pMinY > this._partBox.max.y) continue;
+      if (pMaxZ < this._partBox.min.z || pMinZ > this._partBox.max.z) continue;
+
+      if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
+      const bb = obj.geometry.boundingBox;
+      const pHx2 = (bb.max.x - bb.min.x) * 0.5 * obj.scale.x;
+      const pHy2 = (bb.max.y - bb.min.y) * 0.5 * obj.scale.y;
+      const pHz2 = (bb.max.z - bb.min.z) * 0.5 * obj.scale.z;
+      const bcX = obj.position.x, bcY = obj.position.y, bcZ = obj.position.z;
+
+      const ax = this._v1.set(1, 0, 0).applyQuaternion(obj.quaternion);
+      const ay = this._v2.set(0, 1, 0).applyQuaternion(obj.quaternion);
+      const az = this._v3.set(0, 0, 1).applyQuaternion(obj.quaternion);
+      const dx = bcX - pCx, dy = bcY - pCy, dz = bcZ - pCz;
+
+      let minOverlap = Infinity, minAxis = null;
+      const testAxis = (ax_, ay_, az_) => {
+        const pProj = Math.abs(pHx*ax_) + Math.abs(pHy*ay_) + Math.abs(kHz*az_);
+        const bProj =
+          Math.abs(pHx2*(ax_*ax.x + ay_*ax.y + az_*ax.z)) +
+          Math.abs(pHy2*(ax_*ay.x + ay_*ay.y + az_*ay.z)) +
+          Math.abs(pHz2*(ax_*az.x + ay_*az.y + az_*az.z));
+        const dist = Math.abs(dx*ax_ + dy*ay_ + dz*az_);
+        const overlap = pProj + bProj - dist;
+        if (overlap <= 0) return false;
+        if (overlap < minOverlap) {
+          minOverlap = overlap;
+          minAxis = { x: ax_, y: ay_, z: az_ };
+        }
+        return true;
+      };
+      if (!testAxis(1,0,0)) continue;
+      if (!testAxis(0,1,0)) continue;
+      if (!testAxis(0,0,1)) continue;
+      if (!testAxis(ax.x,ax.y,ax.z)) continue;
+      if (!testAxis(ay.x,ay.y,ay.z)) continue;
+      if (!testAxis(az.x,az.y,az.z)) continue;
+
+      const partAxes = [ax, ay, az];
+      let separated = false;
+      for (const pAxis of [[1,0,0],[0,1,0],[0,0,1]]) {
+        for (const qAxis of partAxes) {
+          const cx = pAxis[1]*qAxis.z - pAxis[2]*qAxis.y;
+          const cy = pAxis[2]*qAxis.x - pAxis[0]*qAxis.z;
+          const cz = pAxis[0]*qAxis.y - pAxis[1]*qAxis.x;
+          const lenSq = cx*cx + cy*cy + cz*cz;
+          if (lenSq < 1e-8) continue;
+          const invLen = 1 / Math.sqrt(lenSq);
+          if (!testAxis(cx*invLen, cy*invLen, cz*invLen)) { separated = true; break; }
+        }
+        if (separated) break;
+      }
+      if (separated || !minAxis) continue;
+
+      const dot = dx*minAxis.x + dy*minAxis.y + dz*minAxis.z;
+      const pushDir = dot > 0
+        ? { x: -minAxis.x, y: -minAxis.y, z: -minAxis.z }
+        : minAxis;
+
+      const partUnanchored = obj.userData.anchored === false;
+
+      if (partUnanchored && pushDir.y < 0.5) {
+        const hdx = bcX - pCx;
+        const hdz = bcZ - pCz;
+        const hlen = Math.hypot(hdx, hdz) || 1;
+        const nx = hdx / hlen;
+        const nz = hdz / hlen;
+        obj.position.x += nx * minOverlap;
+        obj.position.z += nz * minOverlap;
+        const pv = obj.userData.velocity;
+        const playerSpeed = this.velocity.x * nx + this.velocity.z * nz;
+        const partSpeed = pv.x * nx + pv.z * nz;
+        if (playerSpeed > partSpeed) {
+          pv.x += (playerSpeed - partSpeed) * nx;
+          pv.z += (playerSpeed - partSpeed) * nz;
+        }
+        this.bus.emit('object:moved', obj);
+        continue;
+      }
+
+      this.group.position.x += pushDir.x * minOverlap;
+      this.group.position.y += pushDir.y * minOverlap;
+      this.group.position.z += pushDir.z * minOverlap;
+      const vDot = this.velocity.x*pushDir.x +
+                   this.velocity.y*pushDir.y +
+                   this.velocity.z*pushDir.z;
+      if (vDot < 0) {
+        this.velocity.x -= pushDir.x * vDot;
+        this.velocity.y -= pushDir.y * vDot;
+        this.velocity.z -= pushDir.z * vDot;
+      }
+      if (pushDir.y > 0.5) this.onGround = true;
+    }
+  }
+
+  die() {
+    if (this.state !== 'alive') return;
+    this.state = 'dying';
+    const t = this.playersService ? this.playersService.respawnTime : 3;
+    this.respawnTimer = Math.max(0, t);
+    this.velocity.set(0, 0, 0);
+    this.group.visible = false;
+    this.bus.emit('character:died');
+  }
+  respawn() {
+    this.state = 'alive'; this.respawnTimer = 0;
+    this.group.visible = true;
+    this.spawn = this._pickSpawnPoint();
+    this.group.position.copy(this.spawn);
+    this.velocity.set(0, 0, 0);
+    this.onGround = true; this.walkTime = 0;
+    this.armL.rotation.x = 0; this.armR.rotation.x = 0;
+    this.legL.rotation.x = 0; this.legR.rotation.x = 0;
+    this.bus.emit('character:respawned');
+  }
+  dispose(scene) {
+    scene.remove(this.group);
+    this.group.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        if (Array.isArray(o.material)) o.material.forEach(m => m.dispose());
+        else o.material.dispose();
+      }
+    });
+  }
+}
+
+/* ============================================================
+   Tools
+   ============================================================ */
+class Tool {
+  constructor(ctx) { this.ctx = ctx; }
+  activate() {}
+  deactivate() {}
+  onPointerUp(e) {}
+}
+class SelectTool extends Tool {
+  onPointerUp(e) {
+    const hit = this.ctx.raycast(e);
+    if (!hit) { this.ctx.selection.deselect(); return; }
+    this.ctx.selection.select(hit.object);
+  }
+}
+class PlacePartTool extends Tool {
+  constructor(ctx, kind) { super(ctx); this.kind = kind; }
+  activate()   { this.ctx.viewport.classList.add('placing'); }
+  deactivate() { this.ctx.viewport.classList.remove('placing'); }
+  onPointerUp(e) {
+    const hit = this.ctx.raycast(e);
+    if (!hit || !hit.object.userData.isBaseplate) return;
+    const p = hit.point;
+    const mesh = PartFactory.create(this.kind);
+    if (this.kind === 'spawn') {
+      mesh.position.set(Math.round(p.x), 0.25, Math.round(p.z));
+    } else {
+      mesh.position.set(Math.round(p.x * 2) / 2, 1, Math.round(p.z * 2) / 2);
+    }
+    this.ctx.world.add(mesh);
+    this.ctx.objects.push(mesh);
+    const node = new HierNode(mesh.name, this.kind);
+    node.object3D = mesh;
+    mesh.userData.hierNode = node;
+    this.ctx.hierarchy.workspace.add(node);
+    this.ctx.bus.emit('object:added', mesh);
+    this.ctx.selection.select(mesh);
+  }
+}
+class ToolManager {
+  constructor(ctx, bus) {
+    this.ctx = ctx; this.bus = bus;
+    this.tools = new Map(); this.active = null;
+  }
+  register(name, tool) { this.tools.set(name, tool); }
+  use(name) {
+    const tool = this.tools.get(name);
+    if (!tool || tool === this.active) return;
+    this.active?.deactivate();
+    this.active = tool;
+    this.active.activate();
+    this.bus.emit('tool:changed', this.active);
+  }
+}
+
+/* ============================================================
+   Editor
+   ============================================================ */
+function colorToHexString(material) {
+  if (!material) return null;
+  if (Array.isArray(material)) return null;
+  if (!material.color) return null;
+  return '#' + material.color.getHexString();
+}
+function applyColor(material, value) {
+  if (!material) return false;
+  if (Array.isArray(material)) return false;
+  if (!material.color) return false;
+  if (value == null) return false;
+  if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) {
+    material.color.setHex(parseInt(value.slice(1), 16));
+    return true;
+  }
+  if (typeof value === 'number' && isFinite(value)) {
+    material.color.setHex(value & 0xffffff);
+    return true;
+  }
+  return false;
+}
+
+class Editor {
+  constructor() {
+    this.bus = new EventBus();
+    this.canvas = document.getElementById('canvas');
+    this.viewport = document.getElementById('viewport');
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    this.sceneManager = new SceneManager(this.bus);
+    this.world = this.sceneManager.scene;
+    this.cameraRig = new CameraRig(this.renderer, this.canvas, this.viewport, this.bus);
+    this.selection = new SelectionManager(this.world, this.bus);
+
+    this.hierarchy = buildDefaultGame();
+    const baseplateNode = this.hierarchy.workspace.children[0];
+    baseplateNode.object3D = this.sceneManager.baseplate;
+    this.sceneManager.baseplate.userData.hierNode = baseplateNode;
+
+    this.lighting = new LightingService(
+      this.world, this.sceneManager.hemi, this.sceneManager.dir);
+    this.hierarchy.lighting.service = this.lighting;
+
+    this.starterPlayer = new StarterPlayerService();
+    this.hierarchy.starterPlayer.service = this.starterPlayer;
+
+    this.players = new PlayersService();
+    this.hierarchy.players.service = this.players;
+
+    this.starterGui = new StarterGuiService(this.hierarchy.starterGui);
+    this.hierarchy.starterGui.service = this.starterGui;
+    this.guiRenderer = new GUIRenderer(document.getElementById('gui-layer'), this);
+
+    this.objects = [];
+    this.playMode = false;
+    this.character = null;
+    this._savedCamera = null;
+    this._editSnapshot = null;
+
+    this.oof = new OofSynth();
+    this._ray = new THREE.Raycaster();
+    this._ptr = new THREE.Vector2();
+    this._physBox = new THREE.Box3();
+    this._tempBox = new THREE.Box3();
+
+    const ctx = {
+      world: this.world, viewport: this.viewport,
+      objects: this.objects, selection: this.selection, bus: this.bus,
+      hierarchy: this.hierarchy, raycast: (e) => this._raycast(e)
+    };
+    this.ctx = ctx;
+
+    this.toolManager = new ToolManager(ctx, this.bus);
+    this.toolManager.register('select',   new SelectTool(ctx));
+    this.toolManager.register('box',      new PlacePartTool(ctx, 'box'));
+    this.toolManager.register('sphere',   new PlacePartTool(ctx, 'sphere'));
+    this.toolManager.register('cylinder', new PlacePartTool(ctx, 'cylinder'));
+    this.toolManager.register('spawn',    new PlacePartTool(ctx, 'spawn'));
+
+    this._bindPointer();
+    this._bindShortcuts();
+    this.bus.on('character:died', () => this.oof.play());
+
+    this.clock = new THREE.Clock();
+    this._loop = this._loop.bind(this);
+    requestAnimationFrame(this._loop);
+    this.guiRenderer.sync();
+  }
+
+  setTool(name) { if (!this.playMode) this.toolManager.use(name); }
+
+  addTextLabel() {
+    if (this.playMode) return;
+    const sg = this.starterGui;
+    const name = sg.uniqueName('TextLabel');
+    const tl = new TextLabel({ name, text: 'Hello!' });
+    sg.addElement(tl);
+    const node = new HierNode(name, 'textlabel');
+    node.guiElement = tl;
+    tl.hierNode = node;
+    this.hierarchy.starterGui.add(node);
+    this.guiRenderer.sync();
+    this.bus.emit('object:added');
+    this.selection.select(tl);
+  }
+  addImageLabel() {
+    if (this.playMode) return;
+    const sg = this.starterGui;
+    const name = sg.uniqueName('ImageLabel');
+    const il = new ImageLabel({ name });
+    sg.addElement(il);
+    const node = new HierNode(name, 'imagelabel');
+    node.guiElement = il;
+    il.hierNode = node;
+    this.hierarchy.starterGui.add(node);
+    this.guiRenderer.sync();
+    this.bus.emit('object:added');
+    this.selection.select(il);
+  }
+  addVideoLabel() {
+    if (this.playMode) return;
+    const sg = this.starterGui;
+    const name = sg.uniqueName('VideoLabel');
+    const vl = new VideoLabel({ name });
+    sg.addElement(vl);
+    const node = new HierNode(name, 'videolabel');
+    node.guiElement = vl;
+    vl.hierNode = node;
+    this.hierarchy.starterGui.add(node);
+    this.guiRenderer.sync();
+    this.bus.emit('object:added');
+    this.selection.select(vl);
+  }
+
+  deleteGuiElement(el) {
+    this.starterGui.removeElement(el);
+    if (el.hierNode && el.hierNode.parent) el.hierNode.parent.remove(el.hierNode);
+    this.guiRenderer.sync();
+    this.bus.emit('object:removed');
+    if (this.selection.current === el) this.selection.deselect();
+  }
+
+  deleteSelected() {
+    if (this.playMode) return;
+    const obj = this.selection.current;
+    if (!obj) return;
+    if (obj.isGuiElement) { this.deleteGuiElement(obj); return; }
+    if (obj.isService) return;
+
+    this.world.remove(obj);
+    obj.geometry.dispose();
+    if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+    else obj.material.dispose();
+    const i = this.objects.indexOf(obj);
+    if (i >= 0) this.objects.splice(i, 1);
+    const node = obj.userData.hierNode;
+    if (node && node.parent) node.parent.remove(node);
+    this.bus.emit('object:removed', obj);
+    this.selection.deselect();
+  }
+
+  /* ---------- Save / Load ---------- */
+  _serialize() {
+    const parts = this.objects.map(o => ({
+      kind: o.userData.kind || 'box',
+      isSpawn: o.userData.isSpawnLocation === true,
+      name: o.name,
+      position: [o.position.x, o.position.y, o.position.z],
+      rotation: [o.rotation.x, o.rotation.y, o.rotation.z],
+      scale:    [o.scale.x, o.scale.y, o.scale.z],
+      color: colorToHexString(o.material),
+      canCollide: o.userData.canCollide !== false,
+      anchored:   o.userData.anchored !== false,
+      kill:       o.userData.kill === true,
+      velocity: [o.userData.velocity.x, o.userData.velocity.y, o.userData.velocity.z]
+    }));
+
+    const guiElements = this.starterGui.elements.map(el => {
+      const base = {
+        type: el.type, name: el.name,
+        x: el.x, y: el.y, w: el.w, h: el.h,
+        backgroundColor: el.backgroundColor,
+        backgroundTransparency: el.backgroundTransparency,
+        visible: el.visible
+      };
+      if (el.type === 'TextLabel') {
+        return Object.assign(base, {
+          text: el.text, textColor: el.textColor, fontSize: el.fontSize
+        });
+      }
+      if (el.type === 'ImageLabel') {
+        return Object.assign(base, {
+          src: el.src, fileName: el.fileName, imageTransparency: el.imageTransparency
+        });
+      }
+      if (el.type === 'VideoLabel') {
+        return Object.assign(base, {
+          src: el.src, fileName: el.fileName,
+          videoTransparency: el.videoTransparency,
+          looped: el.looped, muted: el.muted, controls: el.controls, autoplay: el.autoplay
+        });
+      }
+      return base;
+    });
+
+    return {
+      version: 4,
+      savedAt: new Date().toISOString(),
+      parts,
+      starterGui: { elements: guiElements },
+      lighting: { clockTime: this.lighting.clockTime },
+      starterPlayer: {
+        cameraZoomable:  this.starterPlayer.cameraZoomable,
+        lockFirstPerson: this.starterPlayer.lockFirstPerson
+      },
+      players: { respawnTime: this.players.respawnTime }
+    };
+  }
+
+  _deserialize(data) {
+    if (!data || !Array.isArray(data.parts)) throw new Error('Invalid file');
+
+    for (const obj of [...this.objects]) {
+      this.world.remove(obj);
+      if (obj.geometry) obj.geometry.dispose();
+      if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+      else if (obj.material) obj.material.dispose();
+      const node = obj.userData.hierNode;
+      if (node && node.parent) node.parent.remove(node);
+    }
+    this.objects.length = 0;
+
+    for (const p of data.parts) {
+      const kind = p.isSpawn ? 'spawn' : (p.kind || 'box');
+      const mesh = PartFactory.create(kind);
+      if (Array.isArray(p.position)) mesh.position.fromArray(p.position);
+      if (Array.isArray(p.rotation)) mesh.rotation.fromArray(p.rotation);
+      if (Array.isArray(p.scale))    mesh.scale.fromArray(p.scale);
+      if (typeof p.name === 'string' && p.name) mesh.name = p.name;
+      applyColor(mesh.material, p.color);
+      mesh.userData.canCollide = p.canCollide !== false;
+      mesh.userData.anchored   = p.anchored !== false;
+      mesh.userData.kill       = p.kill === true;
+      if (Array.isArray(p.velocity) && p.velocity.length === 3) {
+        mesh.userData.velocity.fromArray(p.velocity);
+      } else {
+        mesh.userData.velocity.set(0, 0, 0);
+      }
+      this.world.add(mesh);
+      this.objects.push(mesh);
+      const node = new HierNode(mesh.name, kind);
+      node.object3D = mesh;
+      mesh.userData.hierNode = node;
+      this.hierarchy.workspace.add(node);
+    }
+
+    for (const el of [...this.starterGui.elements]) {
+      if (el.hierNode && el.hierNode.parent) el.hierNode.parent.remove(el.hierNode);
+    }
+    this.starterGui.elements.length = 0;
+
+    if (data.starterGui && Array.isArray(data.starterGui.elements)) {
+      for (const e of data.starterGui.elements) {
+        let el, nodeType;
+        if (e.type === 'ImageLabel') { el = new ImageLabel(e); nodeType = 'imagelabel'; }
+        else if (e.type === 'VideoLabel') { el = new VideoLabel(e); nodeType = 'videolabel'; }
+        else { el = new TextLabel(e); nodeType = 'textlabel'; }
+        this.starterGui.addElement(el);
+        const node = new HierNode(el.name, nodeType);
+        node.guiElement = el;
+        el.hierNode = node;
+        this.hierarchy.starterGui.add(node);
+      }
+    }
+    this.guiRenderer.sync();
+
+    if (data.lighting && typeof data.lighting.clockTime === 'number') {
+      this.lighting.clockTime = data.lighting.clockTime;
+    }
+    if (data.starterPlayer) {
+      if (typeof data.starterPlayer.cameraZoomable === 'boolean')
+        this.starterPlayer.cameraZoomable = data.starterPlayer.cameraZoomable;
+      if (typeof data.starterPlayer.lockFirstPerson === 'boolean')
+        this.starterPlayer.lockFirstPerson = data.starterPlayer.lockFirstPerson;
+    }
+    if (data.players && typeof data.players.respawnTime === 'number') {
+      this.players.respawnTime = data.players.respawnTime;
+    }
+
+    this.selection.deselect();
+    this.bus.emit('object:added');
+    this.bus.emit('parts:restored');
+  }
+
+  saveToFile() {
+    const data = this._serialize();
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'ministudio-place.json';
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    this._toast(`Saved ${data.parts.length} part(s) + ${data.starterGui.elements.length} GUI ✓`);
+  }
+  loadFromFile(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        this._deserialize(data);
+        const guiCount = data.starterGui && data.starterGui.elements ?
+          data.starterGui.elements.length : 0;
+        this._toast(`Loaded ${data.parts.length} part(s) + ${guiCount} GUI ✓`);
+      } catch (err) {
+        console.error('Load failed:', err);
+        this._toast('Load failed: ' + err.message, true);
+      }
+    };
+    reader.onerror = () => this._toast('Could not read file', true);
+    reader.readAsText(file);
+  }
+
+  _toast(msg, isError = false) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.toggle('error', isError);
+    t.classList.add('show');
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+  }
+
+  zoomIn() {
+    if (!this.playMode || this.starterPlayer.lockFirstPerson ||
+        !this.starterPlayer.cameraZoomable) return;
+    this.cameraRig.zoomIn();
+  }
+  zoomOut() {
+    if (!this.playMode || this.starterPlayer.lockFirstPerson ||
+        !this.starterPlayer.cameraZoomable) return;
+    this.cameraRig.zoomOut();
+  }
+  enterPlayMode() {
+    if (this.playMode) return;
+    this.playMode = true;
+    this._savedCamera = {
+      pos: this.cameraRig.camera.position.clone(),
+      target: this.cameraRig.controls.target.clone()
+    };
+    this._editSnapshot = this.objects.map(o => ({
+      obj: o, pos: o.position.clone(), rot: o.rotation.clone(),
+      scale: o.scale.clone(), vel: o.userData.velocity.clone()
+    }));
+    this.character = new Character(this.world, this.bus, this.objects, this.players);
+    this.cameraRig.controls.enableZoom = false;
+    if (this.starterPlayer.lockFirstPerson) {
+      this.cameraRig.setFirstPerson(true);
+    } else {
+      this.cameraRig.setFirstPerson(false);
+      this.cameraRig._cameraDistance = 10;
+      const spawn = this.character.spawn.clone();
+      this.cameraRig.controls.target.set(spawn.x, spawn.y + 2.5, spawn.z);
+      this.cameraRig.camera.position.set(spawn.x, spawn.y + 4.5, spawn.z + 10);
+    }
+    this.selection.setVisible(false);
+    document.body.classList.add('playing');
+    this.guiRenderer.sync();
+    this.bus.emit('playmode:changed', true);
+  }
+  exitPlayMode() {
+    if (!this.playMode) return;
+    this.playMode = false;
+    if (this._editSnapshot) {
+      for (const s of this._editSnapshot) {
+        s.obj.position.copy(s.pos); s.obj.rotation.copy(s.rot);
+        s.obj.scale.copy(s.scale); s.obj.userData.velocity.copy(s.vel);
+      }
+      this._editSnapshot = null;
+      this.selection.refresh();
+      this.bus.emit('parts:restored');
+    }
+    if (this.character) {
+      this.character.dispose(this.world);
+      this.character = null;
+    }
+    this.cameraRig.setFirstPerson(false);
+    this.cameraRig.controls.enableZoom = true;
+    if (this._savedCamera) {
+      this.cameraRig.camera.position.copy(this._savedCamera.pos);
+      this.cameraRig.controls.target.copy(this._savedCamera.target);
+      this._savedCamera = null;
+    }
+    this.selection.setVisible(true);
+    document.body.classList.remove('playing');
+    this.guiRenderer.sync();
+    this.bus.emit('playmode:changed', false);
+  }
+
+  _isPartOnGround(part) {
+    this._tempBox.setFromObject(part);
+    if (this._tempBox.min.y < 0.1) return true;
+    const testMin = this._tempBox.min.y - 0.1;
+    const testMax = this._tempBox.min.y;
+    for (const other of this.objects) {
+      if (other === part) continue;
+      if (other.userData.canCollide === false) continue;
+      const ob = new THREE.Box3().setFromObject(other);
+      if (this._tempBox.max.x > ob.min.x && this._tempBox.min.x < ob.max.x &&
+          this._tempBox.max.z > ob.min.z && this._tempBox.min.z < ob.max.z &&
+          ob.max.y > testMin && ob.max.y <= testMax + 0.05) return true;
+    }
+    return false;
+  }
+
+  _updatePartPhysics(dt) {
+    const GRAVITY = 35, MAX_FALL = 40;
+    const FRICTION_GROUND = 15, FRICTION_AIR = 1.5;
+    for (const part of this.objects) {
+      if (part.userData.anchored !== false) continue;
+      const vel = part.userData.velocity;
+      if (!vel) continue;
+      const onGround = this._isPartOnGround(part);
+      const friction = onGround ? FRICTION_GROUND : FRICTION_AIR;
+      const hSpeed = Math.hypot(vel.x, vel.z);
+      if (hSpeed > 0) {
+        const newSpeed = Math.max(0, hSpeed - friction * dt);
+        const scale = newSpeed / hSpeed;
+        vel.x *= scale; vel.z *= scale;
+      }
+      const oldX = part.position.x, oldZ = part.position.z;
+      part.position.x += vel.x * dt;
+      part.position.z += vel.z * dt;
+      this._physBox.setFromObject(part);
+      for (const other of this.objects) {
+        if (other === part || other.userData.canCollide === false) continue;
+        this._tempBox.setFromObject(other);
+        if (!this._physBox.intersectsBox(this._tempBox)) continue;
+        const ox = Math.min(this._physBox.max.x, this._tempBox.max.x) - Math.max(this._physBox.min.x, this._tempBox.min.x);
+        const oy = Math.min(this._physBox.max.y, this._tempBox.max.y) - Math.max(this._physBox.min.y, this._tempBox.min.y);
+        const oz = Math.min(this._physBox.max.z, this._tempBox.max.z) - Math.max(this._physBox.min.z, this._tempBox.min.z);
+        if (oy > 0 && (ox < oy || oz < oy)) {
+          if (ox <= oz) { part.position.x = oldX; vel.x = 0; }
+          else          { part.position.z = oldZ; vel.z = 0; }
+          this._physBox.setFromObject(part);
+          break;
+        }
+      }
+      vel.y -= GRAVITY * dt;
+      if (vel.y < -MAX_FALL) vel.y = -MAX_FALL;
+      part.position.y += vel.y * dt;
+      this._physBox.setFromObject(part);
+      const onBaseplate = Math.abs(part.position.x) < 100 && Math.abs(part.position.z) < 100;
+      if (onBaseplate && this._physBox.min.y < 0 && vel.y < 0) {
+        part.position.y += (0 - this._physBox.min.y);
+        vel.y = 0;
+        this._physBox.setFromObject(part);
+      }
+      if (vel.y < 0) {
+        for (const other of this.objects) {
+          if (other === part) continue;
+          this._tempBox.setFromObject(other);
+          if (!this._physBox.intersectsBox(this._tempBox)) continue;
+          const pC = (this._physBox.min.y + this._physBox.max.y) * 0.5;
+          const oC = (this._tempBox.min.y + this._tempBox.max.y) * 0.5;
+          if (pC > oC) {
+            part.position.y += (this._tempBox.max.y - this._physBox.min.y);
+            vel.y = 0;
+            this._physBox.setFromObject(part);
+            break;
+          }
+        }
+      }
+      if (vel.y < 0 && this.character && this.character.state === 'alive') {
+        const cpos = this.character.group.position;
+        const cBox = new THREE.Box3(
+          new THREE.Vector3(cpos.x - this.character.halfW, cpos.y, cpos.z - this.character.halfD),
+          new THREE.Vector3(cpos.x + this.character.halfW, cpos.y + this.character.height, cpos.z + this.character.halfD)
+        );
+        if (this._physBox.intersectsBox(cBox)) {
+          const pC = (this._physBox.min.y + this._physBox.max.y) * 0.5;
+          const cC = (cBox.min.y + cBox.max.y) * 0.5;
+          if (pC > cC) { part.position.y += (cBox.max.y - this._physBox.min.y); vel.y = 0; }
+        }
+      }
+      if ((Math.abs(vel.x) > 0.01 || Math.abs(vel.z) > 0.01 || Math.abs(vel.y) > 0.01) &&
+          part === this.selection.current) {
+        this.bus.emit('object:moved', part);
+      }
+    }
+  }
+
+  _raycast(e) {
+    const r = this.canvas.getBoundingClientRect();
+    this._ptr.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+    this._ptr.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+    this._ray.setFromCamera(this._ptr, this.cameraRig.camera);
+    const hits = this._ray.intersectObjects(
+      [this.sceneManager.baseplate, ...this.objects], false);
+    return hits[0] || null;
+  }
+
+  _bindPointer() {
+    let down = null, drag = null;
+    const DRAG_THRESHOLD = 4;
+    this.canvas.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || this.playMode) return;
+      down = { x: e.clientX, y: e.clientY, hit: this._raycast(e) };
+      drag = null;
+    });
+    this.canvas.addEventListener('pointermove', (e) => {
+      if (!down || this.playMode) return;
+      const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+      if (!drag && moved > DRAG_THRESHOLD) {
+        const obj = down.hit?.object;
+        if (!obj || obj.userData.isBaseplate) { down = null; return; }
+        this.selection.select(obj);
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -obj.position.y);
+        const offset = down.hit.point.clone().sub(obj.position);
+        drag = { obj, plane, offset };
+        document.body.classList.add('dragging');
+      }
+      if (drag) {
+        const r = this.canvas.getBoundingClientRect();
+        this._ptr.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+        this._ptr.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+        this._ray.setFromCamera(this._ptr, this.cameraRig.camera);
+        const pt = new THREE.Vector3();
+        if (this._ray.ray.intersectPlane(drag.plane, pt)) {
+          pt.sub(drag.offset);
+          drag.obj.position.set(
+            Math.round(pt.x * 2) / 2, drag.obj.position.y,
+            Math.round(pt.z * 2) / 2);
+          this.selection.syncOutline();
+          this.bus.emit('object:moved', drag.obj);
+        }
+      }
+    });
+    this.canvas.addEventListener('pointerup', (e) => {
+      if (e.button !== 0 || !down) return;
+      const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+      const wasDragging = !!drag;
+      down = null; drag = null;
+      document.body.classList.remove('dragging');
+      if (wasDragging || moved > DRAG_THRESHOLD) return;
+      this.toolManager.active?.onPointerUp(e);
+    });
+    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  _bindShortcuts() {
+    addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' ||
+          e.target.isContentEditable) return;
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault(); this.saveToFile(); return;
+      }
+      if (this.playMode) {
+        if (e.key === 'i' || e.key === 'I') { this.zoomIn(); return; }
+        if (e.key === 'o' || e.key === 'O') { this.zoomOut(); return; }
+        if (e.key === 'Escape') { this.exitPlayMode(); return; }
+        return;
+      }
+      if (e.key === 'Escape') { this.selection.deselect(); return; }
+      if (e.key === '1') this.setTool('select');
+      if (e.key === '2') this.setTool('box');
+      if (e.key === '3') this.setTool('sphere');
+      if (e.key === '4') this.setTool('cylinder');
+      if (e.key === '5') this.setTool('spawn');
+      if (e.key === '6') this.addTextLabel();
+      if (e.key === '7') this.addImageLabel();
+      if (e.key === '8') this.addVideoLabel();
+      if (e.key === 'Delete' || e.key === 'Backspace') this.deleteSelected();
+    });
+  }
+
+  _loop() {
+    requestAnimationFrame(this._loop);
+    const dt = Math.min(this.clock.getDelta(), 0.1);
+    if (this.playMode) this._updatePartPhysics(dt);
+    if (this.playMode && this.character) {
+      this.character.update(dt, this.cameraRig.keys, this.cameraRig.camera);
+      const alive = this.character.state === 'alive';
+      const basePos = alive ? this.character.group.position : this.character.spawn;
+      if (this.starterPlayer.lockFirstPerson) {
+        const headPos = basePos.clone(); headPos.y += 4.75;
+        this.cameraRig.camera.position.copy(headPos);
+        this.cameraRig.camera.rotation.set(
+          this.cameraRig._pitch, this.cameraRig._yaw, 0, 'YXZ');
+        this.character.group.visible = false;
+      } else {
+        this.character.group.visible = alive;
+        const target = basePos.clone(); target.y += 2.5;
+        const delta = target.clone().sub(this.cameraRig.controls.target);
+        this.cameraRig.camera.position.add(delta);
+        this.cameraRig.controls.target.copy(target);
+        const FIXED = this.starterPlayer.cameraZoomable
+          ? this.cameraRig._cameraDistance : 10;
+        const dir = this.cameraRig.camera.position.clone()
+          .sub(this.cameraRig.controls.target);
+        const curDist = dir.length();
+        if (curDist > 0.01) {
+          dir.normalize().multiplyScalar(FIXED);
+          this.cameraRig.camera.position.copy(this.cameraRig.controls.target).add(dir);
+        }
+        this.cameraRig.controls.update();
+      }
+    } else {
+      this.cameraRig.update(dt);
+      this.cameraRig.controls.update();
+      this.selection.syncOutline();
+    }
+    this.renderer.render(this.world, this.cameraRig.camera);
+  }
+}
+
+/* ============================================================
+   Toolbar
+   ============================================================ */
+class Toolbar {
+  constructor(editor) {
+    this.editor = editor;
+    const el = document.getElementById('toolbar');
+    const group = document.createElement('div');
+    group.style.display = 'flex'; group.style.gap = '4px';
+    group.style.alignItems = 'center'; group.style.flexWrap = 'wrap';
+
+    const toolDefs = [
+      { id: 'select',   label: 'Select',   key: '1' },
+      { id: 'box',      label: 'Part',     key: '2' },
+      { id: 'sphere',   label: 'Sphere',   key: '3' },
+      { id: 'cylinder', label: 'Cylinder', key: '4' },
+      { id: 'spawn',    label: 'Spawn',    key: '5' },
+    ];
+    for (const b of toolDefs) {
+      const btn = document.createElement('button');
+      btn.className = 'tool-btn';
+      btn.textContent = b.label;
+      btn.title = `${b.label} (${b.key})`;
+      btn.dataset.tool = b.id;
+      btn.onclick = () => editor.setTool(b.id);
+      group.appendChild(btn);
+    }
+
+    const sep = document.createElement('div'); sep.className = 'sep'; group.appendChild(sep);
+
+    const textBtn = document.createElement('button');
+    textBtn.className = 'tool-btn gui'; textBtn.textContent = '+ Text';
+    textBtn.title = 'Add a TextLabel to StarterGui (6)';
+    textBtn.onclick = () => editor.addTextLabel();
+    group.appendChild(textBtn);
+
+    const imageBtn = document.createElement('button');
+    imageBtn.className = 'tool-btn gui'; imageBtn.textContent = '+ Image';
+    imageBtn.title = 'Add an ImageLabel to StarterGui (7)';
+    imageBtn.onclick = () => editor.addImageLabel();
+    group.appendChild(imageBtn);
+
+    const videoBtn = document.createElement('button');
+    videoBtn.className = 'tool-btn gui'; videoBtn.textContent = '+ Video';
+    videoBtn.title = 'Add a VideoLabel to StarterGui (8)';
+    videoBtn.onclick = () => editor.addVideoLabel();
+    group.appendChild(videoBtn);
+
+    const sep2 = document.createElement('div'); sep2.className = 'sep'; group.appendChild(sep2);
+
+    const del = document.createElement('button');
+    del.className = 'tool-btn danger'; del.textContent = 'Delete';
+    del.title = 'Delete (Del)'; del.onclick = () => editor.deleteSelected();
+    group.appendChild(del);
+
+    const sep3 = document.createElement('div'); sep3.className = 'sep'; group.appendChild(sep3);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'tool-btn save'; saveBtn.textContent = '💾 Save';
+    saveBtn.title = 'Save scene (Ctrl+S)';
+    saveBtn.onclick = () => editor.saveToFile();
+    group.appendChild(saveBtn);
+
+    const loadBtn = document.createElement('button');
+    loadBtn.className = 'tool-btn load'; loadBtn.textContent = '📂 Load';
+    loadBtn.title = 'Load a scene';
+    loadBtn.onclick = () => this._fileInput.click();
+    group.appendChild(loadBtn);
+
+    this._fileInput = document.createElement('input');
+    this._fileInput.type = 'file'; this._fileInput.accept = '.json,application/json';
+    this._fileInput.style.display = 'none';
+    this._fileInput.onchange = () => {
+      const file = this._fileInput.files && this._fileInput.files[0];
+      if (file) editor.loadFromFile(file);
+      this._fileInput.value = '';
+    };
+    document.body.appendChild(this._fileInput);
+
+    const sep4 = document.createElement('div'); sep4.className = 'sep'; group.appendChild(sep4);
+
+    const playBtn = document.createElement('button');
+    playBtn.className = 'tool-btn play'; playBtn.textContent = '▶ Play';
+    playBtn.title = 'Enter play mode';
+    playBtn.onclick = () => editor.enterPlayMode();
+    group.appendChild(playBtn);
+
+    const stopBtn = document.createElement('button');
+    stopBtn.className = 'tool-btn stop'; stopBtn.textContent = '■ Stop';
+    stopBtn.title = 'Stop (Esc)';
+    stopBtn.disabled = true;
+    stopBtn.onclick = () => editor.exitPlayMode();
+    group.appendChild(stopBtn);
+
+    el.appendChild(group);
+
+    editor.bus.on('tool:changed', (tool) => {
+      const active = [...editor.toolManager.tools.entries()]
+        .find(([, t]) => t === tool)?.[0];
+      el.querySelectorAll('.tool-btn[data-tool]').forEach(b => {
+        b.classList.toggle('active', b.dataset.tool === active);
+      });
+    });
+    editor.bus.on('playmode:changed', (playing) => {
+      playBtn.disabled = playing;
+      stopBtn.disabled = !playing;
+    });
+    editor.setTool('select');
+  }
+}
+
+/* ============================================================
+   Explorer
+   ============================================================ */
+class Explorer {
+  constructor(editor) {
+    this.editor = editor;
+    this.el = document.getElementById('tree');
+    this.render();
+    editor.bus.on('object:added',     () => this.render());
+    editor.bus.on('object:removed',   () => this.render());
+    editor.bus.on('selection:changed',() => this.render());
+  }
+  render() {
+    this.el.innerHTML = '';
+    this._renderNode(this.editor.hierarchy.root, this.el, 0);
+  }
+  _renderNode(node, parentEl, depth) {
+    const row = document.createElement('div');
+    row.className = 'tree-item';
+    row.style.paddingLeft = (depth * 12) + 'px';
+    const arrow = document.createElement('span');
+    arrow.className = 'tree-arrow';
+    if (node.children.length > 0) {
+      arrow.textContent = node.expanded ? '▼' : '▶';
+      arrow.onclick = (e) => {
+        e.stopPropagation();
+        node.expanded = !node.expanded;
+        this.render();
+      };
+    }
+    row.appendChild(arrow);
+    const icon = document.createElement('span');
+    icon.className = 'tree-icon ' + node.type;
+    row.appendChild(icon);
+    const label = document.createElement('span');
+    label.className = 'tree-label';
+    label.textContent = node.name;
+    row.appendChild(label);
+
+    const sel = this.editor.selection.current;
+    if ((node.object3D && node.object3D === sel) ||
+        (node.service  && node.service  === sel) ||
+        (node.guiElement && node.guiElement === sel)) {
+      row.classList.add('selected');
+    }
+    row.onclick = () => {
+      if (node.object3D)       this.editor.selection.select(node.object3D);
+      else if (node.guiElement) this.editor.selection.select(node.guiElement);
+      else if (node.service)   this.editor.selection.select(node.service);
+      else {
+        if (node.children.length > 0) {
+          node.expanded = !node.expanded; this.render();
+        } else this.editor.selection.deselect();
+      }
+    };
+    parentEl.appendChild(row);
+    if (node.expanded) {
+      for (const child of node.children) {
+        this._renderNode(child, parentEl, depth + 1);
+      }
+    }
+  }
+}
+
+/* ============================================================
+   Inspector
+   ============================================================ */
+class Inspector {
+  constructor(editor) {
+    this.editor = editor;
+    this.el = document.getElementById('props');
+    this.render(null);
+    editor.bus.on('selection:changed', (obj) => this.render(obj));
+    editor.bus.on('object:moved', (obj) => {
+      if (obj === this.editor.selection.current && !obj.isGuiElement)
+        this._updatePositionOnly(obj);
+    });
+    editor.bus.on('gui:moved', (el) => {
+      if (el === this.editor.selection.current) this._updateGuiPosition(el);
+    });
+    editor.bus.on('parts:restored', () => {
+      this.render(this.editor.selection.current);
+    });
+  }
+  _updatePositionOnly(obj) {
+    if (!obj) return;
+    const posInputs = [...this.el.querySelectorAll('input[type="number"]')].slice(0, 3);
+    ['x', 'y', 'z'].forEach((a, i) => {
+      if (posInputs[i] && document.activeElement !== posInputs[i]) {
+        posInputs[i].value = (+obj.position[a]).toFixed(2);
+      }
+    });
+  }
+  _updateGuiPosition(el) {
+    const inputs = [...this.el.querySelectorAll('input[type="number"]')].slice(0, 4);
+    if (inputs[0] && document.activeElement !== inputs[0]) inputs[0].value = el.x.toFixed(3);
+    if (inputs[1] && document.activeElement !== inputs[1]) inputs[1].value = el.y.toFixed(3);
+  }
+  render(obj) {
+    this.el.innerHTML = '';
+    if (!obj) {
+      const e = document.createElement('div');
+      e.className = 'empty'; e.textContent = 'Select an object';
+      this.el.appendChild(e);
+      return;
+    }
+    if (obj.isService && obj.serviceType === 'Lighting')      { this._renderLighting(obj); return; }
+    if (obj.isService && obj.serviceType === 'StarterPlayer') { this._renderStarterPlayer(obj); return; }
+    if (obj.isService && obj.serviceType === 'Players')       { this._renderPlayers(obj); return; }
+    if (obj.isService && obj.serviceType === 'StarterGui')    { this._renderStarterGui(obj); return; }
+    if (obj.isGuiElement && obj.type === 'TextLabel')         { this._renderTextLabel(obj); return; }
+    if (obj.isGuiElement && obj.type === 'ImageLabel')        { this._renderImageLabel(obj); return; }
+    if (obj.isGuiElement && obj.type === 'VideoLabel')        { this._renderVideoLabel(obj); return; }
+
+    this._text('Name', obj.name, (v) => {
+      obj.name = v;
+      const node = obj.userData.hierNode;
+      if (node) { node.name = v; this.editor.bus.emit('object:removed'); }
+    });
+    this._vec3('Position', obj.position, () => this.editor.selection.refresh());
+    this._vec3('Rotation (deg)', new THREE.Vector3(
+      THREE.MathUtils.radToDeg(obj.rotation.x),
+      THREE.MathUtils.radToDeg(obj.rotation.y),
+      THREE.MathUtils.radToDeg(obj.rotation.z)
+    ), (axis, val) => {
+      obj.rotation[axis] = THREE.MathUtils.degToRad(val);
+      this.editor.selection.refresh();
+    }, true);
+    this._vec3('Size', obj.scale, () => this.editor.selection.refresh());
+    if (obj.material && obj.material.color && !obj.userData.isSpawnLocation) {
+      this._color('Color', obj.material.color, (hex) => obj.material.color.set(hex));
+    }
+    this._toggle('CanCollide', obj.userData.canCollide !== false,
+      (yes) => { obj.userData.canCollide = yes; });
+    this._toggle('Anchored', obj.userData.anchored !== false, (yes) => {
+      obj.userData.anchored = yes;
+      if (yes) obj.userData.velocity.set(0, 0, 0);
+    });
+    this._toggle('Kill', obj.userData.kill === true,
+      (yes) => { obj.userData.kill = yes; });
+  }
+
+  _renderStarterGui(sg) {
+    const head = document.createElement('div');
+    head.className = 'field';
+    head.innerHTML = `<label>Class</label><div style="color:#ccc">StarterGui</div>`;
+    this.el.appendChild(head);
+
+    const info = document.createElement('div');
+    info.className = 'field';
+    info.innerHTML = `<label>Children</label><div style="color:#ccc">${sg.elements.length} element(s)</div>`;
+    this.el.appendChild(info);
+
+    const b1 = document.createElement('button');
+    b1.className = 'add-btn'; b1.textContent = '+ TextLabel';
+    b1.onclick = () => this.editor.addTextLabel();
+    this.el.appendChild(b1);
+
+    const b2 = document.createElement('button');
+    b2.className = 'add-btn'; b2.textContent = '+ ImageLabel';
+    b2.onclick = () => this.editor.addImageLabel();
+    this.el.appendChild(b2);
+
+    const b3 = document.createElement('button');
+    b3.className = 'add-btn'; b3.textContent = '+ VideoLabel';
+    b3.onclick = () => this.editor.addVideoLabel();
+    this.el.appendChild(b3);
+  }
+
+  _renderTextLabel(tl) {
+    const head = document.createElement('div');
+    head.className = 'field';
+    head.innerHTML = `<label>Class</label><div style="color:#ccc">TextLabel</div>`;
+    this.el.appendChild(head);
+
+    this._text('Name', tl.name, (v) => {
+      tl.name = v;
+      if (tl.hierNode) { tl.hierNode.name = v; this.editor.bus.emit('object:removed'); }
+    });
+
+    const textWrap = this._field('Text');
+    const ta = document.createElement('textarea');
+    ta.value = tl.text;
+    ta.oninput = () => { tl.text = ta.value; this.editor.guiRenderer.sync(); };
+    textWrap.appendChild(ta);
+
+    this._fractionPair('Position', tl, 'x', 'y');
+    this._fractionPair('Size', tl, 'w', 'h');
+    this._colorHexString('TextColor', tl.textColor, (hex) => {
+      tl.textColor = hex; this.editor.guiRenderer.sync();
+    });
+    this._colorHexString('BackgroundColor', tl.backgroundColor, (hex) => {
+      tl.backgroundColor = hex; this.editor.guiRenderer.sync();
+    });
+    this._floatField('BackgroundTransparency', tl.backgroundTransparency, 0, 1, 0.01, (v) => {
+      tl.backgroundTransparency = v; this.editor.guiRenderer.sync();
+    });
+    this._floatField('FontSize', tl.fontSize, 4, 200, 1, (v) => {
+      tl.fontSize = v; this.editor.guiRenderer.sync();
+    });
+    this._toggle('Visible', tl.visible, (yes) => {
+      tl.visible = yes; this.editor.guiRenderer.sync();
+    });
+  }
+
+  _renderImageLabel(il) {
+    const head = document.createElement('div');
+    head.className = 'field';
+    head.innerHTML = `<label>Class</label><div style="color:#ccc">ImageLabel</div>`;
+    this.el.appendChild(head);
+
+    this._text('Name', il.name, (v) => {
+      il.name = v;
+      if (il.hierNode) { il.hierNode.name = v; this.editor.bus.emit('object:removed'); }
+    });
+    this._fractionPair('Position', il, 'x', 'y');
+    this._fractionPair('Size', il, 'w', 'h');
+    this._mediaFile('Image', il, 'image/*');
+    this._floatField('ImageTransparency', il.imageTransparency, 0, 1, 0.01, (v) => {
+      il.imageTransparency = v; this.editor.guiRenderer.sync();
+    });
+    this._colorHexString('BackgroundColor', il.backgroundColor, (hex) => {
+      il.backgroundColor = hex; this.editor.guiRenderer.sync();
+    });
+    this._floatField('BackgroundTransparency', il.backgroundTransparency, 0, 1, 0.01, (v) => {
+      il.backgroundTransparency = v; this.editor.guiRenderer.sync();
+    });
+    this._toggle('Visible', il.visible, (yes) => {
+      il.visible = yes; this.editor.guiRenderer.sync();
+    });
+  }
+
+  _renderVideoLabel(vl) {
+    const head = document.createElement('div');
+    head.className = 'field';
+    head.innerHTML = `<label>Class</label><div style="color:#ccc">VideoLabel</div>`;
+    this.el.appendChild(head);
+
+    this._text('Name', vl.name, (v) => {
+      vl.name = v;
+      if (vl.hierNode) { vl.hierNode.name = v; this.editor.bus.emit('object:removed'); }
+    });
+    this._fractionPair('Position', vl, 'x', 'y');
+    this._fractionPair('Size', vl, 'w', 'h');
+    this._mediaFile('Video', vl, 'video/*');
+    this._floatField('VideoTransparency', vl.videoTransparency, 0, 1, 0.01, (v) => {
+      vl.videoTransparency = v; this.editor.guiRenderer.sync();
+    });
+    this._toggle('Looped',   vl.looped,   (yes) => { vl.looped = yes;   this.editor.guiRenderer.sync(); });
+    this._toggle('Muted',    vl.muted,    (yes) => { vl.muted = yes;    this.editor.guiRenderer.sync(); });
+    this._toggle('Controls', vl.controls, (yes) => { vl.controls = yes; this.editor.guiRenderer.sync(); });
+    this._toggle('Autoplay', vl.autoplay, (yes) => { vl.autoplay = yes; this.editor.guiRenderer.sync(); });
+    this._colorHexString('BackgroundColor', vl.backgroundColor, (hex) => {
+      vl.backgroundColor = hex; this.editor.guiRenderer.sync();
+    });
+    this._floatField('BackgroundTransparency', vl.backgroundTransparency, 0, 1, 0.01, (v) => {
+      vl.backgroundTransparency = v; this.editor.guiRenderer.sync();
+    });
+    this._toggle('Visible', vl.visible, (yes) => {
+      vl.visible = yes; this.editor.guiRenderer.sync();
+    });
+  }
+
+  _mediaFile(label, el, accept) {
+    const wrap = this._field(label);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:4px;align-items:center;';
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.style.cssText = 'flex:1;min-width:0;color:#ccc;font-size:11px;cursor:pointer;';
+    input.onchange = async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      try {
+        const url = await readFileAsDataURL(file);
+        el.src = url;
+        el.fileName = file.name;
+        this.editor.guiRenderer.sync();
+        this.editor._toast(`Loaded ${file.name} (${formatBytes(file.size)}) ✓`);
+        this.render(el);
+      } catch (err) {
+        console.error(err);
+        this.editor._toast('Failed to load file', true);
+      }
+    };
+    row.appendChild(input);
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = 'Clear';
+    resetBtn.style.cssText =
+      'background:#3c3c3c;color:#eee;border:1px solid #555;' +
+      'padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;flex-shrink:0;';
+    resetBtn.onclick = () => {
+      el.src = null;
+      el.fileName = null;
+      this.editor.guiRenderer.sync();
+      this.render(el);
+    };
+    row.appendChild(resetBtn);
+    wrap.appendChild(row);
+    const info = document.createElement('div');
+    info.style.cssText =
+      'font-size:10px;margin-top:3px;overflow:hidden;' +
+      'text-overflow:ellipsis;white-space:nowrap;';
+    if (el.src) {
+      info.style.color = '#888';
+      info.textContent = (el.fileName || 'loaded') + ' (' + formatBytes(el.src.length) + ')';
+    } else {
+      info.style.color = '#555';
+      info.textContent = 'No ' + label.toLowerCase() + ' loaded';
+    }
+    wrap.appendChild(info);
+  }
+
+  _floatField(label, value, min, max, step, onChange) {
+    const wrap = this._field(label);
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = min; input.max = max; input.step = step;
+    input.value = (+value).toString();
+    input.oninput = () => {
+      let v = parseFloat(input.value);
+      if (!isFinite(v)) v = min;
+      v = Math.max(min, Math.min(max, v));
+      onChange(v);
+    };
+    input.onblur = () => { input.value = (+value).toString(); };
+    wrap.appendChild(input);
+  }
+  _colorHexString(label, value, onChange) {
+    const wrap = this._field(label);
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.value = value;
+    input.style.width = '100%';
+    input.oninput = () => onChange(input.value);
+    wrap.appendChild(input);
+  }
+  _fractionPair(label, obj, k1, k2) {
+    const wrap = this._field(label);
+    const row = document.createElement('div'); row.className = 'row';
+    [ ['X', k1], ['Y', k2] ].forEach(([lbl, key]) => {
+      const input = document.createElement('input');
+      input.type = 'number'; input.step = '0.01';
+      input.min = 0; input.max = 1;
+      input.value = (+obj[key]).toFixed(3);
+      input.title = lbl;
+      input.oninput = () => {
+        let v = parseFloat(input.value);
+        if (!isFinite(v)) v = 0;
+        obj[key] = Math.max(0, Math.min(1, v));
+        this.editor.guiRenderer.sync();
+      };
+      input.onblur = () => { input.value = (+obj[key]).toFixed(3); };
+      row.appendChild(input);
+    });
+    wrap.appendChild(row);
+  }
+
+  _renderStarterPlayer(sp) {
+    const head = document.createElement('div');
+    head.className = 'field';
+    head.innerHTML = `<label>Class</label><div style="color:#ccc">StarterPlayer</div>`;
+    this.el.appendChild(head);
+    this._section('Camera');
+    this._toggle('CameraZoomable', sp.cameraZoomable, (yes) => { sp.cameraZoomable = yes; });
+    this._toggle('LockFirstPerson', sp.lockFirstPerson, (yes) => { sp.lockFirstPerson = yes; });
+  }
+  _renderPlayers(p) {
+    const head = document.createElement('div');
+    head.className = 'field';
+    head.innerHTML = `<label>Class</label><div style="color:#ccc">Players</div>`;
+    this.el.appendChild(head);
+    const wrap = this._field('RespawnTime');
+    const input = document.createElement('input');
+    input.type = 'number'; input.min = 0; input.step = 0.5;
+    input.value = (+p.respawnTime).toString();
+    input.oninput = () => {
+      let v = parseFloat(input.value);
+      if (!isFinite(v) || v < 0) v = 0;
+      p.respawnTime = v;
+    };
+    input.onblur = () => { input.value = (+p.respawnTime).toString(); };
+    wrap.appendChild(input);
+  }
+  _renderLighting(lighting) {
+    const head = document.createElement('div');
+    head.className = 'field';
+    head.innerHTML = `<label>Class</label><div style="color:#ccc">Lighting</div>`;
+    this.el.appendChild(head);
+    this._slider('ClockTime', lighting.clockTime, (v) => { lighting.clockTime = v; }, 0, 24, 0.1);
+    this._file('SunId', lighting.sunFile, (file) => {
+      lighting.setSunImage(file); this.render(lighting);
+    });
+    this._file('MoonId', lighting.moonFile, (file) => {
+      lighting.setMoonImage(file); this.render(lighting);
+    });
+  }
+  _section(label) {
+    const h = document.createElement('div');
+    h.className = 'section-header';
+    h.textContent = label;
+    this.el.appendChild(h);
+  }
+  _field(labelText) {
+    const wrap = document.createElement('div');
+    wrap.className = 'field';
+    const label = document.createElement('label');
+    label.textContent = labelText;
+    wrap.appendChild(label);
+    this.el.appendChild(wrap);
+    return wrap;
+  }
+  _text(label, value, onChange) {
+    const wrap = this._field(label);
+    const input = document.createElement('input');
+    input.type = 'text'; input.value = value;
+    input.oninput = () => onChange(input.value);
+    wrap.appendChild(input);
+  }
+  _vec3(label, vec, onCommit, isDeg) {
+    const wrap = this._field(label);
+    const row = document.createElement('div'); row.className = 'row';
+    ['x', 'y', 'z'].forEach((axis) => {
+      const input = document.createElement('input');
+      input.type = 'number'; input.step = '0.1';
+      input.value = (+vec[axis]).toFixed(2);
+      input.oninput = () => {
+        const v = parseFloat(input.value) || 0;
+        if (isDeg) onCommit(axis, v);
+        else { vec[axis] = v; onCommit(); }
+      };
+      row.appendChild(input);
+    });
+    wrap.appendChild(row);
+  }
+  _color(label, color, onChange) {
+    const wrap = this._field(label);
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.value = '#' + color.getHexString();
+    input.style.width = '100%';
+    input.oninput = () => onChange(input.value);
+    wrap.appendChild(input);
+  }
+  _toggle(label, value, onChange) {
+    const wrap = this._field(label);
+    const select = document.createElement('select');
+    ['Yes', 'No'].forEach((v) => {
+      const opt = document.createElement('option');
+      opt.value = v; opt.textContent = v;
+      if ((value ? 'Yes' : 'No') === v) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.onchange = () => onChange(select.value === 'Yes');
+    wrap.appendChild(select);
+  }
+  _slider(label, value, onChange, min, max, step) {
+    const wrap = this._field(label);
+    const row = document.createElement('div');
+    row.style.display = 'flex'; row.style.gap = '6px'; row.style.alignItems = 'center';
+    const range = document.createElement('input');
+    range.type = 'range';
+    range.min = min; range.max = max; range.step = step;
+    range.value = value; range.style.flex = '1';
+    const num = document.createElement('input');
+    num.type = 'number';
+    num.min = min; num.max = max; num.step = step;
+    num.value = (+value).toFixed(2);
+    num.style.width = '64px'; num.style.flexShrink = '0';
+    range.oninput = () => {
+      const v = parseFloat(range.value);
+      num.value = v.toFixed(2); onChange(v);
+    };
+    num.oninput = () => {
+      let v = parseFloat(num.value) || 0;
+      v = Math.max(min, Math.min(max, v));
+      range.value = v; onChange(v);
+    };
+    row.appendChild(range); row.appendChild(num);
+    wrap.appendChild(row);
+  }
+  _file(label, currentFile, onChange) {
+    const wrap = this._field(label);
+    const row = document.createElement('div');
+    row.style.display = 'flex'; row.style.gap = '4px'; row.style.alignItems = 'center';
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'image/*';
+    input.style.flex = '1'; input.style.minWidth = '0';
+    input.onchange = () => {
+      const file = input.files && input.files[0];
+      if (file) onChange(file);
+    };
+    row.appendChild(input);
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = 'Reset';
+    resetBtn.style.cssText =
+      'background:#3c3c3c;color:#eee;border:1px solid #555;' +
+      'padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;flex-shrink:0;';
+    resetBtn.onclick = () => onChange(null);
+    row.appendChild(resetBtn);
+    wrap.appendChild(row);
+    const nameEl = document.createElement('div');
+    nameEl.style.cssText =
+      'font-size:10px;margin-top:3px;overflow:hidden;' +
+      'text-overflow:ellipsis;white-space:nowrap;';
+    if (currentFile) {
+      nameEl.style.color = '#888';
+      nameEl.textContent = 'Current: ' + currentFile.name;
+    } else {
+      nameEl.style.color = '#555';
+      nameEl.textContent = 'Current: default';
+    }
+    wrap.appendChild(nameEl);
+  }
+}
+
+/* ============================================================
+   StatusBar
+   ============================================================ */
+class StatusBar {
+  constructor(editor) {
+    this.editor = editor;
+    this.el = document.getElementById('status-text');
+    this.playEl = document.getElementById('status-play');
+    const refresh = () => {
+      const toolName = [...editor.toolManager.tools.entries()]
+        .find(([, t]) => t === editor.toolManager.active)?.[0] || 'none';
+      this.el.textContent =
+        `Tool: ${toolName}   |   Parts: ${editor.objects.length}   |   GUI: ${editor.starterGui.elements.length}`;
+    };
+    editor.bus.on('tool:changed', refresh);
+    editor.bus.on('object:added', refresh);
+    editor.bus.on('object:removed', refresh);
+    editor.bus.on('playmode:changed', (playing) => {
+      this.playEl.style.display = playing ? 'inline' : 'none';
+      refresh();
+    });
+    refresh();
+  }
+}
+
+/* ============================================================
+   Bootstrap
+   ============================================================ */
+const editor = new Editor();
+new Toolbar(editor);
+new Explorer(editor);
+new Inspector(editor);
+new StatusBar(editor);
+window.editor = editor;
+</script>
+</body>
+</html>
